@@ -767,9 +767,11 @@ if __name__ == '__main__':
     n_realisations = 20
     if not len(param_names) == 1:
         print(f'Generating {n_realisations} random noise process realisations from the posteriors')
-        plot_realisations(n_realisations, chains, params, dms, dmerrs, t, Tspan, 
-                          Tref_dm, flags, parfile, Nharm, outdir, psrname, toas, timing_model, save=True, 
-                          add_dms=True, no_title=True)
+        try: plot_realisations(n_realisations, chains, params, dms, dmerrs, t, Tspan, 
+                               Tref_dm, flags, parfile, Nharm, outdir, psrname, toas, timing_model, save=True, 
+                               add_dms=True, no_title=True)
+        except Exception:
+            print(f'Due to inefficient sampling, the realisations cannot be reliably constructed.')
     
     process_finish = time.time()
     print(f'\nThe process took {(process_finish-process_start)/60:.4f} minutes to finish')
