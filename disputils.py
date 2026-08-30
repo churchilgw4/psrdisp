@@ -504,5 +504,102 @@ def read_dmfile(dmfile, return_flags=False):
         print(f'\nThe process will terminate')
         sys.exit()
 
+class DispParam:
+    '''
+        Class to define a DispParam parameter based on a given parameter file
+    '''
+    def __init__(self, idx, **kwargs):
+        self.idx = idx
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+            
+        # Using the PINT naming scheme to defined correlated noises
+        
+        self.is_red = True if 'TN' in self.name else False
+        self.is_white = True if ('EFAC' in self.name or 'EQUAD' in self.name) else False
+        self.is_deterministic = True if (not self.is_red and not self.is_white) else False
+        self._get_param_labels()
+        
+        self._print_param_info()
+    
+    def _get_param_labels(self):
+        '''
+            Function to generate parameter labels
+        '''
+        if not self.is_red:
+            self.label = self.name
+        else:
+            if 'DM' in self.name:
+                if 'AMP' in self.name:
+                    self.label = r'$\log_{10}A_{\rm DMN}$'
+                else:
+                    self.label = r'$\gamma_{\rm DMN}$'
+            elif 'SW' in self.name:
+                if 'AMP' in self.name:
+                    self.label = r'$\log_{10}A_{\rm SWN}$'
+                else:
+                    self.label = r'$\gamma_{\rm SWN}$'
+            else:
+                raise ValueError(f'Unrecognised parameter name: {self.name}')
+
+    def _print_param_info(self):
+        '''
+            Function to print the parameter attributes
+        '''
+        print(f'\nParameter: {self.name}')
+        print(f'\t - Prior Distribution: {self.dist.capitalize()}({self.min}, {self.max})')
+        print(f'\t - Flag: {self.flag}')
+        print(f'\t - Label: {self.label}')
+        print(f'\t - Is red noise parameter: {self.is_red}')
+        print(f'\t - Is white noise parameter: {self.is_white}')
+        print(f'\t - Is deterministic parameter: {self.is_deterministic}')
+        
+
+def get_DispParams(paramfile):
+    '''
+        Function to return a list of DispParam objects for a parameter file
+        InParams: Path to the parameter file
+        Output: A list of DispParam objects
+    '''
+    if os.path.isfile(paramfile):
+        paramlines = np.array([f.split('\n')[0] for 
+                               f in open(paramfile, 'r').readlines() 
+                               if not f.startswith('#')])
+        params = []
+        for pidx, paramline in enumerate(paramlines):
+            entries = paramline.split()
+            pname, pmin, pmax, pdist = entries[:4]
+            pflag = entries[4] if len(entries) > 4 else 'no-flag'
+            param = DispParam(pidx, name=pname, min=pmin, max=pmax, dist=pdist, flag=pflag)
+            params.append(param)
+    
+        return params
+        
+    else:
+        print(f'\nThe parameter file {paramfile} does not exist')
+        print(f'\nThe process will terminate')
+        sys.exit()
+
+
+
+
+## TBD
+# 1. Defining class for parameters -- DONE
+# 2. Defining a wrapper function to directly create parmaeters as per the file -- DONE
+# 3. Updating functions wherever the parameters are being accessed as a dictionary
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     

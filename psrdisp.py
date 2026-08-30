@@ -24,7 +24,7 @@ if __name__ == '__main__':
     parser.add_argument(f'--dmfile', required=True, 
                         help=f'Path to the epoch-wise DM time series file')
     
-    parser.add_argument(f'--paramlist', required=True, 
+    parser.add_argument(f'--paramfile', required=True, 
                         help=f'Path to the parameter file')
 
     parser.add_argument(f'--narrowband', action=f'store_true', default=False, 
@@ -57,7 +57,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     if not args.narrowband and not args.timfile:
-        print(f'\nNo timfile provided for wideband DMs')
+        print(f'\nA timfile must be provided for wideband DMs')
         print(f'\nThe process will terminate')
         sys.exit()
 
@@ -79,6 +79,7 @@ if __name__ == '__main__':
 
     # Generic for narrowband or wideband
     t, dms, dmerrs, flags = read_dmfile(args.dmfile, return_flags=True)
+    Tspan = t[-1] - t[0]
 
     psrname = get_parfile_param(args.parfile, 'PSRJ')
     print(f'\nPulsar Name: {psrname}')
@@ -96,6 +97,7 @@ if __name__ == '__main__':
     print(f'\nNumber of SWN harmonics = {args.SWNharm}')
     print(f'\nDM groups as per the DM time series: {np.unique(flags)}')
 
+    params = get_DispParams(args.paramfile)
     
 
 
