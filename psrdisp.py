@@ -40,7 +40,7 @@ if __name__ == '__main__':
                         help=f'Path to the output directory')
     
     parser.add_argument(f'--sampler', type=str, default=f'emcee', 
-                        help=f'Sampler to be used for estimating the posteriors')
+                        help=f'Sampler to be used for estimating the posteriors (supported: emcee or pocomc)')
 
     parser.add_argument(f'--DMNharm', type=int, default=None, 
                         help=f'Number of harmonics for DM noise process')
@@ -55,11 +55,6 @@ if __name__ == '__main__':
                         help=f'Reference chromatic frequency for transformations')
 
     args = parser.parse_args()
-
-    if not args.narrowband and not args.timfile:
-        print(f'\nA timfile must be provided for wideband DMs')
-        print(f'\nThe process will terminate')
-        sys.exit()
 
     if args.outdir:
         outdir = args.outdir
@@ -83,6 +78,7 @@ if __name__ == '__main__':
 
     psrname = get_parfile_param(args.parfile, 'PSRJ')
     print(f'\nPulsar Name: {psrname}')
+    plot_dmseries(t, dms, dmerrs, outdir, psrname)
 
     Tref_pos = np.longdouble(get_parfile_param(args.parfile, f'POSEPOCH'))*u.day.to(u.s)
     Tref_dm = np.longdouble(get_parfile_param(args.parfile, f'DMEPOCH'))*u.day.to(u.s)
@@ -97,9 +93,29 @@ if __name__ == '__main__':
     print(f'\nNumber of SWN harmonics = {args.SWNharm}')
     print(f'\nDM groups as per the DM time series: {np.unique(flags)}')
 
-    params = get_DispParams(args.paramfile)
+    # Creating the timing model and ToAs object from PINT
+    psrmodel = get_model(parfile=args.parfile, allow_tcb=True, allow_T2=True)
+    if not args.narrowband and not args.timfile:
+        print(f'\nA timfile must be provided for wideband DMs')
+        print(f'\nThe process will terminate')
+        sys.exit()
+    else:
+        if not args.narrowband:
+            if os.path.isfile(args.timfile):
+                print(f'\nGenerating ToAs using the tim file {args.timfile}')
+                psrtoas = get_toas_from_timfile()
+            else:
+                print(f'\nThe tim file {args.timfile} does not exist')
+                print(f'\nThe process will terminate')
+                sys.exit()
+        else:
+            print(f'\nGenerating ToAs using MJDs from the DM time series')
     
-
+    params = get_DispParams(args.paramfile)
+    sample_noise(name=args.sampler, params=params, Nsamples=args.Nsamples, DMNharm=args.DMNharm, 
+                 SWNharm=args.SWNharm, chaindir=chaindir, psrname=psrname, t=t, dms=dms, dmerrs=dmerrs, 
+                 Tspan=Tspan, Tref_dm=Tref_dm, Tref_sw=Tref_sw, toas=psrtoas, flags=flags, 
+                 timing_model=psrmodel, plotchains=True, truthsfile=args.truthsfile)
 
 
 

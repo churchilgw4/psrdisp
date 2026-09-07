@@ -5,6 +5,11 @@ import matplotlib.pyplot as plt
 import scipy.linalg as sl
 import os
 import sys
+import emcee
+import corner
+import multiprocessing as mp
+import pocomc as pc
+from scipy import stats
 
 def get_freqs(Tspan, Nharm=None):
     '''
@@ -513,16 +518,13 @@ class DispParam:
         for key, value in kwargs.items():
             setattr(self, key, value)
             
-        # Using the PINT naming scheme to defined correlated noises
-        
         self.is_red = True if 'TN' in self.name else False
         self.is_white = True if ('EFAC' in self.name or 'EQUAD' in self.name) else False
         self.is_deterministic = True if (not self.is_red and not self.is_white) else False
-        self._get_param_labels()
-        
+        self._set_param_labels()
         self._print_param_info()
     
-    def _get_param_labels(self):
+    def _set_param_labels(self):
         '''
             Function to generate parameter labels
         '''
@@ -554,7 +556,6 @@ class DispParam:
         print(f'\t - Is white noise parameter: {self.is_white}')
         print(f'\t - Is deterministic parameter: {self.is_deterministic}')
         
-
 def get_DispParams(paramfile):
     '''
         Function to return a list of DispParam objects for a parameter file
@@ -580,15 +581,121 @@ def get_DispParams(paramfile):
         print(f'\nThe process will terminate')
         sys.exit()
 
+def plot_dmseries(t, dms, dmerrs, outdir, psrname):
+    '''
+        Function to plot a given DM time series
+        InParams: time in sec, DMs and DM erros in pc/cm^3, path to the output directory
+                  and pulsar name
+        Output: None
+    '''
+    print(f'\nPlotting the DM time series for {psrname}')
+    fig = plt.figure(figsize=(10, 4), dpi=200)
+    plt.errorbar(t*u.s.to(u.day), dms, yerr=dmerrs, fmt='o', ms=7, c='crimson', alpha=0.5, \
+                 elinewidth=1.0, capsize=2, capthick=0.5, ecolor='k')
+    plt.ticklabel_format(useOffset=False)
+    plt.grid(ls='dashed')
+    plt.xlabel(f'MJD', fontweight='bold', fontsize=13)
+    plt.ylabel(rf'DM [pc/cm$^3$]', fontweight='bold', fontsize=13)
+    plt.title(rf'{psrname}, Median DMerr = {np.median(dmerrs):.2e} pc/cm$^3$', fontweight='bold')
+    plt.tight_layout()
+    plt.savefig(f'{outdir}/{psrname}.DM.time.series.pdf', dpi=200)
 
+def sample_noise(name, params, Nsamples, DMNharm, SWNharm, chaindir, psrname, 
+                 t, dms, dmerrs, Tspan, Tref_dm, Tref_sw, toas, flags, 
+                 timing_model, plotchains=False, truthsfile=None):
+    '''
+        Function to sample the posteriors of dispersive noise processes
+        InParams:
+        Output: None
+    '''
+    Ndim = len(params)
+    chainfile = f'{chaindir}/{psrname}.psrdisp.chains.npy'
+    param_names = [param.name for param in params]
+    param_labels = [param.label for param in params]
+    if os.path.isfile(chainfile):
+        print(f'\nUsing the existing chains from {chainfile}')
+        chains = np.loadtxt(chainfile)
+    else:
+        if name == 'emcee':
+            Nburn = Nsamples//4
+            Nthin = 2
+            Nwalkers = Ndim*5
+            args = (params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, 
+                    timing_model, DMNharm, SWNharm)
+            print(f'\nNdim: {Ndim}, Nsamples (per walker): {Nsamples}, Nwalkers: {Nwalkers}')
+            with mp.Pool() as pool:
+                p0 = np.array([prior_transform(theta, params) for 
+                               theta in np.random.rand(Nwalkers, Ndim)])
+                sampler = emcee.EnsembleSampler(Nwalkers, Ndim, get_lnpost, 
+                                                args=args, pool=pool)
+                sampler.reset()
+                sampler.run_mcmc(p0, Nsamples, progress=True, store=False)
+                chains = sampler.get_chain(flat=True, discard=Nburn, thin=Nthin)
+                print(f'\nPlotting the chains for all parameters')
+                if plotchains:
+                    for dim in range(Ndim):
+                        plt.figure(figsize=(10, 3), dpi=100)
+                        plt.plot(chains[Nburn:, Ndim], color='crimson', alpha=0.3)
+                        plt.xlabel(f'Samples', fontweight='bold', fontsize=10)
+                        plt.ylabel(f'Value', fontweight='bold', fontsize=10)
+                        plt.title(f'{param[dim].label}', fontweight='bold', fontsize=13)
+                        plt.grid(True, alpha=0.5, ls='dashed')
+                        plt.tight_layout()
+                        plt.savefig(f'{chaindir}/{psrname}.{param_names[dim]}.chains.pdf', dpi=150)
+        
+        elif name == 'pocomc':
+            Nburn = 0
+            mins = np.array([param.min for param in params])
+            maxs = np.array([param.max for param in params])
+            spans = maxs - mins
+            priors = [stats.uniform(loc=low, scale=span) for low, span in zip(mins, spans)]
+            prior = pc.Prior(priors)
+            print(f'\nPrior Distributions:')
+            for pname, dist in zip(param_names, priors):
+                a, b = dist.support()
+                print(f'\n\t{pname}: U({a:.3g}, {b:.3g})')
+            try:
+                with pc.parallel.MPIPool() as pool:
+                    print(f'\nRunning with MPI-enabled pooling')
+                    sampler = pc.Sampler(prior=prior, likelihood=get_lnlike_optimised, n_effective=None, 
+                                         n_active=256, random_state=None, pool=pool, output_dir=chaindir)
+                    sampler.run(save_every=None, n_total=2048, n_evidence=2048)
+                    chains, lnlike, lnpost = sampler.posterior(resample=True)
+            except Exception:
+                print(f'\nRunning without MPI but using {os.cpu_count()} processors')
+                sampler = pc.Sampler(prior=prior, likelihood=get_lnlike_optimised, n_effective=None, 
+                                     n_active=256, random_state=None, pool=os.cpu_count(), output_dir=chaindir)
+                sampler.run(save_every=None, n_total=2048, n_evidence=2048)
+                chains, lnlike, lnpost = sampler.posterior(resample=True)
 
+        print(f'\nSaving the posterior chains in {chainfile}')
+        np.save(chainfile, chains)
+
+    medians = np.median(chains, axis=0)
+    print(f'\nMedian parameter estimates from PSRDISP:')
+    for pname, median in zip(param_names, medians):
+        print(f'\n\t{pname} = {median:.2f}')
+        
+    print(f'\nPlotting the posteriors')
+    if truthsfile and os.path.isfile(truthsfile):
+        truths = np.array([float(f.split('\n')[0].split(' ')[-1]) for 
+                           f in open(truthsfile, 'r').readlines() if not f.startswith('#')])
+    else:
+        truths = None
+        
+    fig = corner.corner(chains[Nburn:, :], labels=param_labels, 
+                        label_kwargs={"fontsize": 14, 'fontweight':'bold'}, 
+                        plot_datapoints=True, hist_kwargs={"density": True}, labelpad=0.05, 
+                        quantiles=(0.16, 0.5, 0.84), color='steelblue', show_titles=True, 
+                        title_kwargs={"fontsize": 12, 'fontweight':'bold'}, 
+                        truths=truths, truth_color='crimson')
+    plt.tight_layout()
+    plt.savefig(f'{chaindir}/{psrname}.psrdisp.noise.pdf', dpi=200)
 
 ## TBD
 # 1. Defining class for parameters -- DONE
 # 2. Defining a wrapper function to directly create parmaeters as per the file -- DONE
 # 3. Updating functions wherever the parameters are being accessed as a dictionary
-
-
 
 
 
