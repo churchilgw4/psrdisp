@@ -110,7 +110,7 @@ if __name__ == '__main__':
         else:
             print(f'\nGenerating ToAs using MJDs from the DM time series')
             psrtoas = make_fake_toas_fromMJDs(t*u.s.to(u.day)*u.day, model=psrmodel, 
-                                              add_noise=False, add_correlated_noise=False
+                                              add_noise=False, add_correlated_noise=False)
     
     params = get_DispParams(args.paramfile, flags)
     sample_noise(name=args.sampler, params=params, Nsamples=args.Nsamples, DMNharm=args.DMNharm, 
