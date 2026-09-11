@@ -10,102 +10,164 @@ import corner
 import multiprocessing as mp
 import pocomc as pc
 from scipy import stats
+import json
+from math import factorial
+
+class DispParam:
+    '''
+        Class to define a DispParam parameter based on a given parameter file
+    '''
+    def __init__(self, idx, **kwargs):
+        self.idx = idx
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+            
+        self.name = self.name.upper()
+        if not self.dist.capitalize() == 'Uniform':
+            raise ValueError(f'Only Uniform prior distributions are allowed')
+            
+        self.is_red = True if 'TN' in self.name else False
+        self.is_white = True if ('EFAC' in self.name or 'EQUAD' in self.name) else False
+        self.is_deterministic = True if (not self.is_red and not self.is_white) else False
+        self._set_param_labels()
+        
+        if self.is_white:
+            self.name = f'{self.name}_{self.flag}'
+        else:
+            self.mask = np.array([True for val in self.mask])
+            
+        self._print_param_info()
+
+    def __repr__(self):
+        return f'{self.name}'
+    
+    def _set_param_labels(self):
+        '''
+            Function to generate parameter labels
+        '''
+        if not self.is_red:
+            self.label = self.name
+        else:
+            if 'DM' in self.name:
+                if 'AMP' in self.name:
+                    self.label = r'$\log_{10}A_{\rm DMN}$'
+                else:
+                    self.label = r'$\gamma_{\rm DMN}$'
+            elif 'SW' in self.name:
+                if 'AMP' in self.name:
+                    self.label = r'$\log_{10}A_{\rm SWN}$'
+                else:
+                    self.label = r'$\gamma_{\rm SWN}$'
+            else:
+                raise ValueError(f'Unrecognised parameter name: {self.name}')
+
+    def _print_param_info(self):
+        '''
+            Function to print the parameter attributes
+        '''
+        print(f'\nParameter: {self.name}')
+        print(f'\t - Prior Distribution: {self.dist.capitalize()}({self.min}, {self.max})')
+        print(f'\t - Flag: {self.flag}')
+        print(f'\t - Label: {self.label}')
+        print(f'\t - Is red noise parameter: {self.is_red}')
+        print(f'\t - Is white noise parameter: {self.is_white}')
+        print(f'\t - Is deterministic parameter: {self.is_deterministic}')
+
+    def set_values(self, median=None, sigma=None, map=None):
+        '''
+            Function to set the median and standard deviation of parameters
+        '''
+        self.median = median
+        self.sigma = sigma
+        self.map = map
+
+def get_DispParams(paramfile, flags):
+    '''
+        Function to return a list of DispParam objects for a parameter file
+        InParams: Path to the parameter file
+        Output: A list of DispParam objects
+    '''
+    if os.path.isfile(paramfile):
+        if not isinstance(flags, np.ndarray):
+            flags = np.array(flags)
+            
+        paramlines = np.array([f.split('\n')[0] for 
+                               f in open(paramfile, 'r').readlines() 
+                               if not f.startswith('#')])
+        params = []
+        for pidx, paramline in enumerate(paramlines):
+            entries = paramline.split()
+            pname, pmin, pmax, pdist = entries[:4]
+            pflag = entries[4] if len(entries) > 4 else 'no-flag'
+            pmask = np.array(flags == pflag)
+            param = DispParam(pidx, name=pname, min=pmin, max=pmax, dist=pdist, 
+                              flag=pflag, mask=pmask)
+            params.append(param)
+    
+        return params
+        
+    else:
+        print(f'\nThe parameter file {paramfile} does not exist')
+        print(f'\nThe process will terminate')
+        sys.exit()
 
 def get_freqs(Tspan, Nharm=None):
     '''
         Function to get the Fourier-domain frequencies
-        InParams: Time span in seconds and possibly number of harmonics
-        Output: Array of evenly-spaced linear Fourier-frequencies
+        InParams: time span in s and possibly number of harmonics
+        Output: array of uniformly-spaced linear Fourier-frequencies
     '''
     if not Nharm:
+        print(f'\nSince no harmonics are providing, setting Nharm as per 1/month')
         Tspan_years = Tspan*u.s.to(u.year)
         Nharm = int(np.floor(Tspan_years*12))
     
     f = np.linspace(1/Tspan, Nharm/Tspan, Nharm)
-    
     return f
 
-def get_Nmat(dmerrs, theta, params, flags):
+def get_Nmat(theta, dmerrs, params):
     '''
-        Function to get the white-noise covariance matrix
-        InParams: DM errors, samples, parameter vector and DM flags
-        Output: DM White-noise covariance matrix
+        Function to get the DM white-noise covariance matrix assuming logarithmic quadrature factors.
+        Currently it does not support dense jitter-affected correlations
+        InParams: parameter sample vector, DM errors in pc/cm^3, and a list of DispParam paramters
+        Output: the DM White-noise covariance matrix
     '''
-    # Faster computation using vectors instead of square matrices
-    pnames = [key for key in params.keys()]
-    dmefacs, dmequads = {}, {}
-    for index, pname in enumerate(pnames):
-        if 'dmefac' in pname or 'DMEFAC' in pname:
-            dmefacs[pname] = {}
-            dmefacs[pname]['idx'] = index
-        elif 'dmequad' in pname or 'DMEQUAD' in pname:
-            dmequads[pname] = {}
-            dmequads[pname]['idx'] = index
-
-    uniqueflags = np.unique(flags)
+    dispefacparams = np.array([param for param in params if param.is_white and 'EFAC' in param.name])
+    dispequadparams = np.array([param for param in params if param.is_white and 'EQUAD' in param.name])
     
-    if uniqueflags.size == 1:
-        if not len(dmefacs) and not len(dmequads):
-            dmefac, dmequad = 1.0, -np.inf
-        elif not len(dmefacs) and len(dmequads):
-            dmefac = 1.0
-            dmequad = np.array([theta[dmequads[p]['idx']] for p in dmequads.keys()])
-        elif not len(dmequads) and len(dmefacs):
-            dmefac = np.array([theta[dmefacs[p]['idx']] for p in dmefacs.keys()])
-            dmequad = -np.inf
-        else:
-            dmefac = np.array([theta[dmefacs[p]['idx']] for p in dmefacs.keys()])
-            dmequad = np.array([theta[dmequads[p]['idx']] for p in dmequads.keys()])
-
+    if not np.any(dispefacparams) and not np.any(dispequadparams):
+        raise ValueError(f'No white noise parameters present in the noise model')
     else:
-        mask = {val: flags==val for val in uniqueflags}
-        if not len(dmefacs) and not len(dmequads):
-            dmefac, dmequad = 1.0, -np.inf
+        if not np.any(dispefacparams):
+            dispefacs = np.ones(dmerrs.size)
+            dispequads = np.concatenate([theta[param.idx]*np.ones(dmerrs.size)*param.mask 
+                                         for param in dispequadparams])
         
-        elif not len(dmefacs) and len(dmequads):
-            dmefac = 1.0
-            for dmequad, flag in zip(dmequads.keys(), uniqueflags):
-                dmequads[dmequad]['mask'] = mask[flag]
-                dmequads[dmequad]['vals'] = theta[dmequads[dmequad]['idx']]*np.ones(dmerrs.size)[dmequads[dmequad]['mask']]
-            dmequad = np.concatenate([dmequads[p]['vals'] for p in dmequads.keys()])
+        if not np.any(dispequadparams):
+            dispefacs = np.concatenate([theta[param.idx]*np.ones(dmerrs.size)*param.mask 
+                                         for param in dispefacparams])
+            dispequads = -np.inf*np.ones(dmerrs.size)
 
-        elif not len(dmequads) and len(dmefacs):
-            dmequad = -np.inf
-            for dmefac, flag in zip(dmefacs.keys(), uniqueflags):
-                dmefacs[dmefac]['mask'] = mask[flag]
-                dmefacs[dmefac]['vals'] = theta[dmefacs[dmefac]['idx']]*np.ones(dmerrs.size)[dmefacs[dmefac]['mask']]
-            dmefac = np.concatenate([dmefacs[p]['vals'] for p in dmefacs.keys()])
-
-        else:
-            for dmefac, dmequad, flag in zip(dmefacs.keys(), dmequads.keys(), uniqueflags):
-                dmefacs[dmefac]['mask'] = dmequads[dmequad]['mask'] = mask[flag]
-                dmefacs[dmefac]['vals'] = theta[dmefacs[dmefac]['idx']]*np.ones(dmerrs.size)[dmefacs[dmefac]['mask']]
-                dmequads[dmequad]['vals'] = theta[dmequads[dmequad]['idx']]*np.ones(dmerrs.size)[dmequads[dmequad]['mask']]
-            dmefac = np.concatenate([dmefacs[p]['vals'] for p in dmefacs.keys()])
-            dmequad = np.concatenate([dmequads[p]['vals'] for p in dmequads.keys()])
-
-    Nmat = np.array(dmefac**2 * (dmerrs**2 + 10**(2*dmequad)))
-    
-    return Nmat
+        Nmat = np.array(dispefacs**2 * (dmerrs**2 + 10**(2*dispequads)))
+        return Nmat
 
 def powerlaw(f, Tspan, log10_A, gamma):
     '''
         Function to get the Fourier-domain power-law for a given basis
-        InParams: Array of linear Fourier-frequencies, Time span in seconds, 
+        InParams: array of linear Fourier-frequencies, Time span in seconds, 
                   power-law amplitude and spectral index
-        Output: Power Spectral Density of Gaussian Process
+        Output: the Power Spectral Density of a Fourier-domain spectral process
     '''
     yr = 1*u.year.to(u.s)
     fyr = 1/yr
     pl = ((10**log10_A)**2/(12*np.pi**2*Tspan))*f**(-gamma)*fyr**(gamma-3)
-    
     return pl
 
 def get_parfile_param(parfile, param):
     '''
-        Function to get the parfile entry for a given parameter
-        InParams: Pulsar ephemeris file and parameter name
-        Output: Value of parameter as per the ephemeris file
+        Function to get the pulsar ephemeris entry for a given parameter
+        InParams: path to the pulsar ephemeris file and parameter name
+        Output: the value of parameter as per the ephemeris file
     '''
     if os.path.isfile(parfile):
         parlines = [f.split('\n')[0] for f in open(parfile, 'r').readlines() 
@@ -130,155 +192,139 @@ def get_parfile_param(parfile, param):
         print(f'\nThe process will terminate')
         sys.exit()
 
-# Adding a check if the SolarWindDispersion component is present in the Timing Model
-def get_dm_sw(toas, timing_model, n_earth=1.0):
+def get_Phimat(theta, Tspan, params, DMNharm, SWNharm):
+    '''
+        Function to get the Gaussian Process kernel matrix for power-law processes
+        InParams: parameter sample vector, time span in s, and list of DispParam parameters
+        Output: the GP kernel matrix for a PL spectrum with analytically marginalised DM Polynomial
+    '''
+    dmnparams = np.array([param for param in params if param.is_red and 'DM' in param.name])
+    swnparams = np.array([param for param in params if param.is_red and 'SW' in param.name])
+    
+    if dmnparams.size:
+        f_dmn = get_freqs(Tspan, DMNharm)
+        log10_A_dmn = [par for par in dmnparams if par.name == 'TNDMAMP'][0]
+        gamma_dmn = [par for par in dmnparams if par.name == 'TNDMGAM'][0]
+    else:
+        f_dmn = np.zeros(0)
+
+    if swnparams.size:
+        f_swn = get_freqs(Tspan, SWNharm)
+        log10_A_swn = [par for par in swnparams if par.name == 'TNSWAMP'][0]
+        gamma_swn = [par for par in swnparams if par.name == 'TNSWGAM'][0]
+    else:
+        f_swn = np.zeros(0)
+
+    Phi = []
+    Phi.extend([1e+40, 1e+40, 1e+40])
+
+    if f_dmn.size:
+        dmn = np.zeros(2*f_dmn.size)
+        for i in range(f_dmn.size):
+            dmn[2*i] = dmn[2*i+1] = powerlaw(f_dmn[i], Tspan, log10_A=theta[log10_A_dmn.idx], 
+                                             gamma=theta[gamma_dmn.idx])
+        Phi.extend(dmn)
+
+    if f_swn.size:
+        swn = np.zeros(2*f_swn.size)
+        for i in range(f_swn.size):
+            swn[2*i] = swn[2*i+1] = powerlaw(f_swn[i], Tspan, log10_A=theta[log10_A_swn.idx], 
+                                             gamma=theta[gamma_swn.idx])
+        Phi.extend(swn)
+
+    return np.array(Phi)
+
+def get_Umat(t, f, Tspan, Tref_dm, Tref_sw, params, toas, timing_model, fref):
+    '''
+        Function to get the basis matrix for Fourier domain red noise process
+        This implementation considers SWEPOCH to be the same as the DMEPOCH
+        Also, the entries for DMGP and SWGP are scaled with fref**2/DMconst to make them coherent
+        with the definitions in ENTERPRSIE (taking fref as 1400 MHz for comparison)
+        InParams: time in s, Fourier frequencies in 1/s, time span in s, DM reference epoch in s, 
+                  SW reference epoch in s, list of DispParam parameters, ToAs object (PINT), 
+                  timing model onject (PINT), and chromatic reference frequency in MHz
+        Output: the DM basis matrix
+    '''
+
+    dmnparams = np.array([param for param in params if param.is_red and 'DM' in param.name])
+    swnparams = np.array([param for param in params if param.is_red and 'SW' in param.name])
+    
+    if dmnparams.size:
+        f_dmn = get_freqs(Tspan, DMNharm)
+        convfactor = fref**2/DMconst
+    else:
+        f_dmn = np.zeros(0)
+
+    if swnparams.size:
+        f_swn = get_freqs(Tspan, SWNharm)
+        dm_sw = get_dm_sw(toas, timing_model, n_earth=1.0)
+    else:
+        f_swn = np.zeros(0)
+
+    U = [[0 for val in range(3)] for i in range(t.size)]
+    for i in range(t.size):
+        U[i][0] = 1.0
+        U[i][1] = (t[i]-Tref_dm)*u.s.to(u.year)
+        U[i][2] = 0.5*((t[i]-Tref_dm)*u.s.to(u.year))**2
+        if f_dmn.size:
+            dmn = np.zeros(2*f_dmn.size)
+            for j in range(f_dmn.size):
+                uval = 2*np.pi*(j+1)*(t[i]-Tref_dm)/Tspan
+                dmn[2*j] = np.sin(uval)*convfactor.value
+                dmn[2*j+1] = np.cos(uval)*convfactor.value
+            U[i].extend(dmn)
+        if f_swn.size:
+            swn = np.zeros(2*f_swn.size)
+            for j in range(f_swn.size):
+                uval = 2*np.pi*(j+1)*(t[i]-Tref_sw)/Tspan
+                swn[2*j] = np.sin(uval)*dm_sw[i]
+                swn[2*j+1] = np.cos(uval)*dm_sw[i]
+            U[i].extend(swn)
+    
+    return np.array(U)
+
+def get_dm_sw(toas, timing_model, n_earth):
     '''
         Function to return the DM contribution from solar wind
+        InParams: ToAs object (PINT), timing model object (PINT) and solar-wind electron density in 1/cm^3
+        Output: the DM induced by the solar-wind electron density
     '''
-    geometric_factor = timing_model.components['SolarWindDispersion'].solar_wind_geometry(toas).value
-    dm_sw = n_earth*geometric_factor
+    if 'SolarWindDispersion' in timing_model.components:
+        geometric_factor = timing_model.components['SolarWindDispersion'].solar_wind_geometry(toas).value
+        dm_sw = n_earth*geometric_factor
+    else:
+        raise KeyError(f'The SolarWindDispersion component is absent in the timing model')
     
     return dm_sw
 
-def get_swdetsignal(t, Tref_dm, toas, timing_model, theta, params):
+def get_swdetsignal(t, Tref_sw, toas, timing_model, theta, params):
     '''
         Function to get a deterministic signal for the solar-wind process
+        InParams: time in s, SW reference epoch in s, ToAs object (PINT), 
+                  timing model object (PINT), parameter sample vector and list of DispParam parameters
+        Output: the DM contribution from deterministic SW process with a polynomial form
     '''
-    pnames = [key for key in params.keys()]
-    swdetparams = {}
-    for index, pname in enumerate(pnames):
-        if 'ne_sw' in pname or 'NE_SW' in pname:
-            swdetparams[pname] = index
+    swdetparams = [param for param in params if param.is_deterministic and 'NE_SW' in param.name]
+    orders = [int(param.name.split('NE_SW')[-1]) if param.name.split('NE_SW')[-1] else 0 
+              for param in swdetparams]
 
     if not len(swdetparams):
         signal = np.zeros(t.size)
     else:
         # Since the prior_transform is being used, the indexing in theta is set accordingly
         signal = 0
-        for key in swdetparams.keys():
-            pidx = swdetparams[key]
-            if key == 'ne_sw' or key == 'NE_SW':
-                signal += get_dm_sw(toas, timing_model, theta[pidx])
-            elif key == 'ne_sw1' or key == 'NE_SW1':
-                signal += get_dm_sw(toas, timing_model, theta[pidx])*(t-Tref_dm)*u.s.to(u.year)
-            elif key == 'ne_sw2' or key == 'NE_SW2':
-                signal += get_dm_sw(toas, timing_model, theta[pidx])*0.5*((t-Tref_dm)*u.s.to(u.year))**2
-            else:
-                raise Exception(f'The deterministic solar-wind signal cannot account for {key} for now.')
-                
+        for param, order in zip(swdetparams, orders):
+            signal += get_dm_sw(toas, timing_model, theta[param.idx])*((t-Tref_sw)*u.s.to(u.year))**order/factorial(order)
+
     fid_dm = float(get_parfile_param(parfile, 'DM'))
     signal += fid_dm
     return signal
 
-def get_Umat(t, f, Tspan, Tref_dm, params, toas, timing_model, fref=1400*u.MHz):
-    '''
-        Function to get the basis matrix for Fourier domain red noise process
-        This implementation considers SWEPOCH to be the same as the DMEPOCH
-        Also, the entries for DMGP and SWGP are scaled with fref**2/DMconst to make them coherent
-        with the definitions in ENTERPRSIE (taking fref as 1400 MHz for comparison)
-    '''
-    pnames = [key for key in params.keys()]
-    dmgp_params = [pname for pname in pnames if 'gp_dm' in pname or 'GP_DM' in pname]
-    swgp_params = [pname for pname in pnames if 'gp_sw' in pname or 'GP_SW' in pname]
-    
-    # If there are no SWGP parameters then swparams has 0 size
-    if len(dmgp_params):
-        if len(swgp_params):
-            U = np.zeros((t.size, 4*f.size+3))
-        else:
-            U = np.zeros((t.size, 2*f.size+3))
-    elif len(swgp_params):
-        U = np.zeros((t.size, 2*f.size+3))
-    else:
-        # Only including the DM Taylor Series process
-        U = np.zeros((t.size, 3))
-
-    convfactor = fref**2/DMconst
-    for i in range(t.size):
-        # Contributions from DMGP
-        if len(dmgp_params):
-            for j in range(f.size):
-                uval = 2*np.pi*(j+1)*(t[i]-Tref_dm)/Tspan
-                U[i, 2*j] = np.sin(uval)*convfactor.value
-                U[i, 2*j+1] = np.cos(uval)*convfactor.value
-
-        # Contributions from DM Taylor Series
-        U[i, -3] = 1.0
-        U[i, -2] = (t[i]-Tref_dm)*u.s.to(u.year)
-        U[i, -1] = 0.5*((t[i]-Tref_dm)*u.s.to(u.year))**2
-
-    # Contributions from SWGP
-    fyr = 1/(1*u.year.to(u.s)*u.s)
-    if len(swgp_params):
-        dm_sw = get_dm_sw(toas, timing_model, n_earth=1.0)
-        for j in range(f.size):
-            uval_sw = 2*np.pi*(j+1)*(t-Tref_dm)/Tspan
-            if not len(dmgp_params):
-                U[:, 2*j] = np.sin(uval_sw)*dm_sw
-                U[:, 2*j+1] = np.cos(uval_sw)*dm_sw
-            else:
-                U[:, 2*f.size+2*j] = np.sin(uval_sw)*dm_sw
-                U[:, 2*f.size+2*j+1] = np.cos(uval_sw)*dm_sw
-                
-    return U
-
-def get_Phimat(f, Tspan, theta, params):
-    '''
-        Function to get the GP kernel matrix for PL process
-    '''
-    pnames = [key for key in params.keys()]
-    dmgp_params = {}
-    swgp_params = {}
-    for index, pname in enumerate(pnames):
-        if 'gp_sw' in pname or 'GP_SW' in pname:
-            swgp_params[pname] = index
-        elif 'gp_dm' in pname or 'GP_DM' in pname:
-            dmgp_params[pname] = index
-    
-    if len(dmgp_params):
-        if len(swgp_params):
-            Phi = np.zeros(4*f.size+3)
-        else:
-            Phi = np.zeros(2*f.size+3)
-    elif len(swgp_params):
-        Phi = np.zeros(2*f.size+3)
-    else:
-        # Only including the DM Taylor Series process
-        Phi = np.zeros(3)
-        
-    if Phi.size > 3:
-        if len(dmgp_params):
-            amp_key = [key for key in dmgp_params.keys() if 'log10_A_gp_dm' in key][0]
-            gamma_key = [key for key in dmgp_params.keys() if 'gamma_gp_dm' in key][0]
-            log10_A_gp_dm = theta[dmgp_params[amp_key]]
-            gamma_gp_dm = theta[dmgp_params[gamma_key]]
-            for i in range(f.size):
-                Phi[2*i] = Phi[2*i+1] = powerlaw(f[i], Tspan, log10_A=log10_A_gp_dm, gamma=gamma_gp_dm)
-            
-            if len(swgp_params):
-                amp_key = [key for key in swgp_params.keys() if 'log10_A_gp_sw' in key][0]
-                gamma_key = [key for key in swgp_params.keys() if 'gamma_gp_sw' in key][0]
-                log10_A_gp_sw = theta[swgp_params[amp_key]]
-                gamma_gp_sw = theta[swgp_params[gamma_key]]
-                for i in range(f.size):
-                    Phi[2*f.size+2*i] = Phi[2*f.size+2*i+1] = powerlaw(f[i], Tspan, log10_A=log10_A_gp_sw, 
-                                                                                      gamma=gamma_gp_sw)
-        elif len(swgp_params):
-            amp_key = [key for key in swgp_params.keys() if 'log10_A_gp_sw' in key][0]
-            gamma_key = [key for key in swgp_params.keys() if 'gamma_gp_sw' in key][0]
-            log10_A_gp_sw = theta[swgp_params[amp_key]]
-            gamma_gp_sw = theta[swgp_params[gamma_key]]
-            for i in range(f.size):
-                Phi[2*i] = Phi[2*i+1] = powerlaw(f[i], Tspan, log10_A=log10_A_gp_sw, gamma=gamma_gp_sw)
-
-    # Default ENTERPRISE construct uses 1e+40 instead of infinity
-    Phi[-3] = Phi[-2] = Phi[-1] = 1e+40
-
-    return Phi
-
 def UniformPrior(value, pmin, pmax):
     '''
         Function to give uniform prior distribution
+        InParams: parameter sample value, parameter minimum value and parameter maximum value
+        Output: the Uniform prior value for a given parameter sample
     '''
     prior = ((value >= pmin) & (value <= pmax)) / (pmax - pmin)
     
@@ -287,61 +333,78 @@ def UniformPrior(value, pmin, pmax):
 def get_lnprior(theta, params):
     '''
         Function to get the log-prior for different parameters
+        InParams: parameter sample vector and list of DispParam parameters
+        Output: the log-prior value as per the parameter samples
     '''
-    if not isinstance(params, dict):
-        raise Exception('Invalid parameter list')
-        
-    pnames = [key for key in params.keys()]
-    pmins = np.array([float(val) for pname in pnames for key, val in params[pname].items() if key == 'pmin'])
-    pmaxs = np.array([float(val) for pname in pnames for key, val in params[pname].items() if key == 'pmax'])
-    pdist = np.array([val for pname in pnames for key, val in params[pname].items() if key == 'dist'])
-    pdistchecks = np.array([dist for dist in pdist if not dist in np.array(['uniform', 'log-uniform'])])
+
+    mins = np.array([param.min for param in params])
+    maxs = np.array([param.max for param in params])
     
-    if np.any(pdistchecks):
-        raise Exception('Only uniform and log-uniform priors are allowed.')
-    
-    lnprior = np.sum([np.log(UniformPrior(value, pmin, pmax)) for value, pmin, pmax in zip(theta, pmins, pmaxs)])
+    lnprior = np.sum([np.log(UniformPrior(value, pmin, pmax)) for value, pmin, pmax in zip(theta, mins, maxs)])
 
     return lnprior
 
-def get_lnpost(theta, params, dms, dmerrs, t, Tspan, 
-               Tref_dm, toas, flags, timing_model, Nharm=None, verbose=True):
+def get_lnpost(theta, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, 
+               timing_model, DMNharm, SWNharm, fref):
     '''
-        Function to get the log-posterior for params
+        Function to get the log-posterior for different paramters
+        InParams: parameter sample vector, list of DispParam parameters, DMs in pc/cm^3, DM errors in pc/cm^3, 
+                  time array in s, time span in s, reference epoch for DM, reference epoch for SW, ToAs object (PINT), 
+                  list of DM flags, timing model object (PINT), DMN harmonics, SWN harmonics 
+                  and the chromatic reference frequency in MHz
+        Output: the log-posterior value as per the parameter samples
     '''
     lnprior = get_lnprior(theta, params)
     
-    # This allows the code to not compute the likelihood for params outside the prior range
     if not np.isfinite(lnprior):
+        # This allows the code to not compute the likelihood for params outside the prior range
         return lnprior
     else:
-        return lnprior + get_lnlike_optimised(theta, params, dms, dmerrs, t, 
-                                              Tspan, Tref_dm, toas, flags, timing_model, Nharm)
+        return lnprior + get_lnlike_optimised(theta, params, dms, dmerrs, t, Tspan, Tref_dm, toas, flags, 
+                                              timing_model, DMNharm, SWNharm, fref)
 
-def prior_transform(theta, params):
+def prior_transform(params, show=True, theta=None):
     '''
-        Function to get the prior transform for params
+        Function to get the prior transform for dispersive noise parameters
+        InParams: parameter sample vector and list of DispParam parameters
+        Output: the transformed prior distributions for the parameters if parameter sample vector
+                is provided, otherwise an array of prior distributions
     '''
-    pnames = [key for key in params.keys()]
-    pmins = np.array([float(val) for pname in pnames for key, val in params[pname].items() if key == 'pmin'])
-    pmaxs = np.array([float(val) for pname in pnames for key, val in params[pname].items() if key == 'pmax'])
-    spans = pmaxs - pmins
-    cube = spans * theta + pmins
+    if isinstance(params, list):
+        for param in params:
+            if not isinstance(param, DispParam):
+                raise TypeError(f'Invalid parameter type for {param.name}')
+    else:
+        raise TypeError(f'A list of DispParam parameters should be provided')
     
-    return cube
+    mins = np.array([param.min for param in params])
+    maxs = np.array([param.max for param in params])
+    spans = maxs - mins
+    if not theta:
+        priors = np.array([stats.uniform(loc=low, scale=span) for low, span in zip(mins, spans)])
+        if show:
+            print(f'\nPrior Distributions:')
+            for pname, dist in zip([param.name for param in params], priors):
+                a, b = dist.support()
+                print(f'\n\t{pname}: U({a:.3g}, {b:.3g})')
+    else:
+        priors = spans * theta + mins
+    
+    return priors
 
-def get_lnlike_optimised(theta, params, dms, dmerrs, t, Tspan, 
-                         Tref_dm, toas, flags, timing_model, Nharm=None):
+def get_lnlike_optimised(theta, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, 
+                         timing_model, DMNharm, SWNharm, fref):
     '''
-        Function to get the log-likelihood in an optimised form for params
+        Function to get the log-likelihood in an optimised form for all the sampled parameters
+        InParams: parameter sample vector, list of DispParam parameters, DMs in pc/cm^3, DM errors in pc/cm^3, 
+                  time array in s, time span in s, reference epoch for DM, reference epoch for SW, ToAs object (PINT), 
+                  list of DM flags, timing model object (PINT), DMN harmonics, and SWN harmonics.
+        Output: the log-likelihood value as per the parameters
     '''
-    f = get_freqs(Tspan, Nharm)
-    N = get_Nmat(dmerrs, theta, params, flags)
-    Phi = get_Phimat(f, Tspan, theta, params)
-    U = get_Umat(t, f, Tspan, Tref_dm, params, toas, timing_model)
-    
-    # DM will remain unaffected if there are no deterministic SW parameters
-    swdet = get_swdetsignal(t, Tref_dm, toas, timing_model, theta, params)
+    N = get_Nmat(theta, dmerrs, params)
+    Phi = get_Phimat(theta, Tspan, params)
+    U = get_Umat(t, f, Tspan, Tref_dm, Tref_sw, params, toas, timing_model, fref)
+    swdet = get_swdetsignal(t, Tref_sw, toas, timing_model, theta, params)
     y = dms - swdet
     
     Ninv_y = y / N
@@ -368,17 +431,19 @@ def get_lnlike_optimised(theta, params, dms, dmerrs, t, Tspan,
 
     return lnlike
 
-def get_realisation(theta, params, dms, dmerrs, t, Tspan, 
-                    Tref_dm, toas, flags, timing_model, Nharm=None):
+def get_realisation(theta, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, 
+                    toas, flags, timing_model, DMNharm, SWNharm, fref):
     '''
-        Function to get a random time-domain noise process realisation 
-        for the analytically marginalised parameters
+        Function to get a random time-domain realisation of stochastic noise processes
+        InParams: parameter sample vector, list of DispParam parameters, DMs in pc/cm^3, DM errors in pc/cm^3, 
+                  time array in s, time span in s, reference epoch for DM, reference epoch for SW, ToAs object (PINT), 
+                  list of DM flags, timing model object (PINT), DMN harmonics, and SWN harmonics.
+        Output: an array of a random time-domain realisation of the stochastic processes
     '''
-    f = get_freqs(Tspan, Nharm)
-    N = get_Nmat(dmerrs, theta, params, flags)
-    Phi = get_Phimat(f, Tspan, theta, params)
-    U = get_Umat(t, f, Tspan, Tref_dm, params, toas, timing_model)
-    swdet = get_swdetsignal(t, Tref_dm, toas, timing_model, theta, params)
+    N = get_Nmat(theta, dmerrs, params)
+    Phi = get_Phimat(theta, Tspan, params)
+    U = get_Umat(t, f, Tspan, Tref_dm, Tref_sw, params, toas, timing_model, fref)
+    swdet = get_swdetsignal(t, Tref_sw, toas, timing_model, theta, params)
     y = dms - swdet
 
     Ninv_U = U / N[:, None]
@@ -392,83 +457,12 @@ def get_realisation(theta, params, dms, dmerrs, t, Tspan,
     
     return realisation
 
-def plot_realisations(n_realisations, chains, params, dms, dmerrs, t, Tspan, 
-                      Tref_dm, flags, parfile, Nharm, outdir, psrname, toas, timing_model, 
-                      save=True, add_dms=False, no_title=False):
-    '''
-        Function to plot noise time-domain noise process realisations
-    '''
-    param_medians = {}
-    param_sigma = {}
-    for i, key in enumerate(params.keys()):
-        param_medians[key] = np.median(chains[:, i])
-        param_sigma[key] = np.std(chains[:, i])
-
-    print(f'Median Parameter Values : \n{param_medians}')
-    print(f'Standard Deviation in Parameter Values : \n{param_sigma}')
-
-    param_choices = np.zeros((n_realisations, len(params)))
-    for index, key in enumerate(param_medians.keys()):
-        mu = param_medians[key]
-        sigma = param_sigma[key]
-        dist = np.random.normal(loc=mu, scale=3*np.abs(sigma), size=n_realisations)
-        param_choices[:, index] = np.random.choice(dist, size=n_realisations)
-
-    DM = float(get_parfile_param(parfile, 'DM'))
-    try: DM1 = float(get_parfile_param(parfile, 'DM1'))
-    except Exception: DM1 = 0.0
-    try: DM2 = float(get_parfile_param(parfile, 'DM2'))
-    except Exception: DM2 = 0.0
-
-    DMdet_signal = DM + DM1*(t-Tref_dm)*u.s.to(u.year) + DM2*0.5*((t-Tref_dm)*u.s.to(u.year))**2
-    
-    # The realisations only provide the variations in DMs due to the parameters in the design matrix
-    full_signal = np.zeros((n_realisations, t.size))
-    for i in range(n_realisations):
-        realisation = get_realisation(param_choices[i, :], params, dms, dmerrs, t, Tspan, 
-                                             Tref_dm, toas, flags, timing_model, Nharm=None)
-        SWdet_signal = get_swdetsignal(t, Tref_dm, toas, timing_model, param_choices[i, :], params) - DM
-        full_signal[i, :] = DMdet_signal + SWdet_signal + realisation
-
-    if add_dms:
-        fig, ax = plt.subplots(figsize=(10, 5), dpi=150, nrows=1, ncols=1, sharex=True)
-        fig.subplots_adjust(wspace=0, hspace=0)
-        ax.ticklabel_format(useOffset=False)
-        ax.grid(ls='dashed')
-        if not no_title:
-            ax.set_title(rf'{psrname}, DM process realisations', fontweight='bold')
-        for i in range(n_realisations):
-            ax.plot(t*u.s.to(u.day), full_signal[i, :], color='k', alpha=0.05)
-        ax.ticklabel_format(useOffset=False)
-        ax.grid(ls='dashed')
-        _ = ax.set_ylabel(rf'DM [pc/cm$^3$]', fontweight='bold', fontsize=13)
-        _ = ax.set_xlabel(f'MJD', fontweight='bold', fontsize=13)
-        ax.errorbar(t*u.s.to(u.day), dms, yerr=dmerrs, fmt='o', ms=4, c='crimson', alpha=0.3, \
-                         elinewidth=1.0, capsize=2, capthick=0.5, ecolor='k', label='Simulated DM')
-        ax.legend(loc='upper left')
-        plt.tight_layout()
-        if save:
-            plt.savefig(f'{outdir}/{psrname}.realisations.pdf')
-
-    else:
-        fig = plt.figure(figsize=(10, 5), dpi=100)
-        plt.ticklabel_format(useOffset=False)
-        plt.grid(ls='dashed')
-        _ = plt.xlabel(f'MJD', fontweight='bold', fontsize=13)
-        _ = plt.ylabel(rf'DM [pc/cm$^3$]', fontweight='bold', fontsize=13)
-        if not no_title:
-            plt.title(rf'{psrname}, DM process realisations', fontweight='bold')
-        for i in range(n_realisations):
-            plt.plot(t*u.s.to(u.day), full_signal[i, :], color='k', alpha=0.01)
-        plt.tight_layout()
-        if save:
-            plt.savefig(f'{outdir}/{psrname}.realisations.pdf')
-
 def read_dmfile(dmfile, return_flags=False):
     '''
         Function to extract the MJD, DM and DM errors from a DM time series file
-        InParams: DM time series file and option to return flags
-        Output: MJDs converted to s, DMs, DM errors and DM flags (if required)
+        InParams: path to the DM time series file and option to return flags
+        Output: arrays of MJDs converted to s, DMs in pc/cm^3, DM errors in pc/cm^3 and the
+                DM flags (if required)
     '''
     if os.path.isfile(dmfile):
         
@@ -509,82 +503,10 @@ def read_dmfile(dmfile, return_flags=False):
         print(f'\nThe process will terminate')
         sys.exit()
 
-class DispParam:
-    '''
-        Class to define a DispParam parameter based on a given parameter file
-    '''
-    def __init__(self, idx, **kwargs):
-        self.idx = idx
-        for key, value in kwargs.items():
-            setattr(self, key, value)
-            
-        self.is_red = True if 'TN' in self.name else False
-        self.is_white = True if ('EFAC' in self.name or 'EQUAD' in self.name) else False
-        self.is_deterministic = True if (not self.is_red and not self.is_white) else False
-        self._set_param_labels()
-        self._print_param_info()
-    
-    def _set_param_labels(self):
-        '''
-            Function to generate parameter labels
-        '''
-        if not self.is_red:
-            self.label = self.name
-        else:
-            if 'DM' in self.name:
-                if 'AMP' in self.name:
-                    self.label = r'$\log_{10}A_{\rm DMN}$'
-                else:
-                    self.label = r'$\gamma_{\rm DMN}$'
-            elif 'SW' in self.name:
-                if 'AMP' in self.name:
-                    self.label = r'$\log_{10}A_{\rm SWN}$'
-                else:
-                    self.label = r'$\gamma_{\rm SWN}$'
-            else:
-                raise ValueError(f'Unrecognised parameter name: {self.name}')
-
-    def _print_param_info(self):
-        '''
-            Function to print the parameter attributes
-        '''
-        print(f'\nParameter: {self.name}')
-        print(f'\t - Prior Distribution: {self.dist.capitalize()}({self.min}, {self.max})')
-        print(f'\t - Flag: {self.flag}')
-        print(f'\t - Label: {self.label}')
-        print(f'\t - Is red noise parameter: {self.is_red}')
-        print(f'\t - Is white noise parameter: {self.is_white}')
-        print(f'\t - Is deterministic parameter: {self.is_deterministic}')
-        
-def get_DispParams(paramfile):
-    '''
-        Function to return a list of DispParam objects for a parameter file
-        InParams: Path to the parameter file
-        Output: A list of DispParam objects
-    '''
-    if os.path.isfile(paramfile):
-        paramlines = np.array([f.split('\n')[0] for 
-                               f in open(paramfile, 'r').readlines() 
-                               if not f.startswith('#')])
-        params = []
-        for pidx, paramline in enumerate(paramlines):
-            entries = paramline.split()
-            pname, pmin, pmax, pdist = entries[:4]
-            pflag = entries[4] if len(entries) > 4 else 'no-flag'
-            param = DispParam(pidx, name=pname, min=pmin, max=pmax, dist=pdist, flag=pflag)
-            params.append(param)
-    
-        return params
-        
-    else:
-        print(f'\nThe parameter file {paramfile} does not exist')
-        print(f'\nThe process will terminate')
-        sys.exit()
-
 def plot_dmseries(t, dms, dmerrs, outdir, psrname):
     '''
         Function to plot a given DM time series
-        InParams: time in sec, DMs and DM erros in pc/cm^3, path to the output directory
+        InParams: time in s, DM time series in pc/cm^3, DM erros in pc/cm^3, path to the output directory
                   and pulsar name
         Output: None
     '''
@@ -600,18 +522,101 @@ def plot_dmseries(t, dms, dmerrs, outdir, psrname):
     plt.tight_layout()
     plt.savefig(f'{outdir}/{psrname}.DM.time.series.pdf', dpi=200)
 
+def plot_realisations(n_realisations, chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, 
+                      flags, parfile, DMNharm, SWNharm, outdir, psrname, toas, timing_model, 
+                      save=True, add_dms=False, no_title=True, threshold=3.0):
+    '''
+        Function to plot the time-domain realisations of the full DM process including stochastic noises
+        InParams: number of realisations to be plotted, posterior chains of sampled parameters, 
+                  a list of DispParam parameters, DM time series in pc/cm^3, DM errors in pc/cm^3, time in s, 
+                  time span in s, DM reference epoch in s, SW reference epoch in s, list of DM flags, 
+                  path to the pulsar ephemeris file, DMN harmonics, SWN harmonics, path to the output directory, 
+                  pulsar name, ToAs object (PINT), timing model object (PINT), flag to save the plot, 
+                  flag to add DM time series to the realisations, flag to add title in the plot and
+                  the threshold for calculating the randomness in generated realisations
+        Output: None
+    '''
+    param_choices = np.zeros((n_realisations, len(params)))
+    for param in params:
+        median = np.median(chains[:, param.idx])
+        sigma = np.std(chains[:, param.idx])
+        map = np.max(chains[:, param.idx])
+        param.set_values(median=median, sigma=sigma, map=map)
+        print(f'\n{param.name}:')
+        print(f'\n\tMedian value = {param.median:.4f}')
+        print(f'\n\tStandard Deviation = {param.sigma:.4f}')
+        print(f'\n\tMaximum a-posteriori value = {param.map:.4f}')
+        dist = np.random.normal(loc=median, scale=threshold*np.abs(sigma), size=n_realisations)
+        param_choices[:, param.idx] = np.random.choice(dist, size=n_realisations)
+
+    DM = float(get_parfile_param(parfile, 'DM'))
+    try: DM1 = float(get_parfile_param(parfile, 'DM1'))
+    except Exception: DM1 = 0.0
+    try: DM2 = float(get_parfile_param(parfile, 'DM2'))
+    except Exception: DM2 = 0.0
+
+    DMdet_signal = DM + DM1*(t-Tref_dm)*u.s.to(u.year) + DM2*0.5*((t-Tref_dm)*u.s.to(u.year))**2
+    
+    # The realisations only provide the variations due to the stochastic processes
+    full_signal = np.zeros((n_realisations, t.size))
+    for i in range(n_realisations):
+        realisation = get_realisation(param_choices[i, :], params, dms, dmerrs, t, Tspan, 
+                                      Tref_dm, Tref_sw, toas, flags, timing_model, 
+                                      DMNharm, SWNharm, fref)
+        SWdet_signal = get_swdetsignal(t, Tref_sw, toas, timing_model, param_choices[i, :], params) - DM
+        full_signal[i, :] = DMdet_signal + SWdet_signal + realisation
+
+    if add_dms:
+        fig, ax = plt.subplots(figsize=(10, 5), dpi=100, nrows=1, ncols=1, sharex=True)
+        fig.subplots_adjust(wspace=0, hspace=0)
+        ax.ticklabel_format(useOffset=False)
+        ax.grid(ls='dashed')
+        if not no_title:
+            ax.set_title(rf'{psrname}, DM process realisations', fontweight='bold')
+        for i in range(n_realisations):
+            ax.plot(t*u.s.to(u.day), full_signal[i, :], color='k', alpha=0.05)
+        ax.ticklabel_format(useOffset=False)
+        ax.grid(ls='dashed')
+        _ = ax.set_ylabel(rf'DM [pc/cm$^3$]', fontweight='bold', fontsize=13)
+        _ = ax.set_xlabel(f'MJD', fontweight='bold', fontsize=13)
+        ax.errorbar(t*u.s.to(u.day), dms, yerr=dmerrs, fmt='o', ms=4, c='crimson', alpha=0.3, \
+                         elinewidth=1.0, capsize=2, capthick=0.5, ecolor='k', label='Simulated DM')
+        ax.legend(loc='upper left')
+        plt.tight_layout()
+        if save:
+            plt.savefig(f'{outdir}/{psrname}.realisations.pdf', dpi=200)
+
+    else:
+        fig = plt.figure(figsize=(10, 5), dpi=100)
+        plt.ticklabel_format(useOffset=False)
+        plt.grid(ls='dashed')
+        _ = plt.xlabel(f'MJD', fontweight='bold', fontsize=13)
+        _ = plt.ylabel(rf'DM [pc/cm$^3$]', fontweight='bold', fontsize=13)
+        if not no_title:
+            plt.title(rf'{psrname}, DM process realisations', fontweight='bold')
+        for i in range(n_realisations):
+            plt.plot(t*u.s.to(u.day), full_signal[i, :], color='k', alpha=0.01)
+        plt.tight_layout()
+        if save:
+            plt.savefig(f'{outdir}/{psrname}.realisations.pdf', dpi=200)
+
 def sample_noise(name, params, Nsamples, DMNharm, SWNharm, chaindir, psrname, 
                  t, dms, dmerrs, Tspan, Tref_dm, Tref_sw, toas, flags, 
-                 timing_model, plotchains=False, truthsfile=None):
+                 timing_model, fref, plotchains=False, truthsfile=None):
     '''
         Function to sample the posteriors of dispersive noise processes
-        InParams:
+        InParams: Sampler name, list of DispParam parameters, Number of emcee samples per walker, 
+                  DMN harmonics, SWN harmonics, path to the directory to store chains and other results, 
+                  name of the pulsar, time array in s, DMs in pc/cm^3, DM errors in pc/cm^3, time span in s,
+                  reference epoch for DM, reference epoch for SW, ToAs object (PINT), list of DM flags,
+                  timing model object (PINT), flag to plot chains, and path to the file with parameter truths.
         Output: None
     '''
     Ndim = len(params)
     chainfile = f'{chaindir}/{psrname}.psrdisp.chains.npy'
     param_names = [param.name for param in params]
     param_labels = [param.label for param in params]
+    args = (params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, timing_model, DMNharm, SWNharm, fref)
     if os.path.isfile(chainfile):
         print(f'\nUsing the existing chains from {chainfile}')
         chains = np.loadtxt(chainfile)
@@ -620,12 +625,10 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, chaindir, psrname,
             Nburn = Nsamples//4
             Nthin = 2
             Nwalkers = Ndim*5
-            args = (params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, 
-                    timing_model, DMNharm, SWNharm)
             print(f'\nNdim: {Ndim}, Nsamples (per walker): {Nsamples}, Nwalkers: {Nwalkers}')
+            p0 = np.array([prior_transform(params=params, show=False, theta=theta) for 
+                           theta in np.random.rand(Nwalkers, Ndim)])
             with mp.Pool() as pool:
-                p0 = np.array([prior_transform(theta, params) for 
-                               theta in np.random.rand(Nwalkers, Ndim)])
                 sampler = emcee.EnsembleSampler(Nwalkers, Ndim, get_lnpost, 
                                                 args=args, pool=pool)
                 sampler.reset()
@@ -641,24 +644,18 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, chaindir, psrname,
                         plt.title(f'{param[dim].label}', fontweight='bold', fontsize=13)
                         plt.grid(True, alpha=0.5, ls='dashed')
                         plt.tight_layout()
-                        plt.savefig(f'{chaindir}/{psrname}.{param_names[dim]}.chains.pdf', dpi=150)
+                        plt.savefig(f'{chaindir}/{psrname}.{params[dim].name}.chains.pdf', dpi=150)
         
         elif name == 'pocomc':
             Nburn = 0
-            mins = np.array([param.min for param in params])
-            maxs = np.array([param.max for param in params])
-            spans = maxs - mins
-            priors = [stats.uniform(loc=low, scale=span) for low, span in zip(mins, spans)]
+            priors = prior_transform(params=params, show=True)
             prior = pc.Prior(priors)
-            print(f'\nPrior Distributions:')
-            for pname, dist in zip(param_names, priors):
-                a, b = dist.support()
-                print(f'\n\t{pname}: U({a:.3g}, {b:.3g})')
             try:
                 with pc.parallel.MPIPool() as pool:
                     print(f'\nRunning with MPI-enabled pooling')
-                    sampler = pc.Sampler(prior=prior, likelihood=get_lnlike_optimised, n_effective=None, 
-                                         n_active=256, random_state=None, pool=pool, output_dir=chaindir)
+                    sampler = pc.Sampler(prior=prior, likelihood=get_lnlike_optimised, likelhood_args=args,
+                                         n_effective=None, n_active=256, random_state=None, 
+                                         pool=pool, output_dir=chaindir)
                     sampler.run(save_every=None, n_total=2048, n_evidence=2048)
                     chains, lnlike, lnpost = sampler.posterior(resample=True)
             except Exception:
@@ -672,9 +669,17 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, chaindir, psrname,
         np.save(chainfile, chains)
 
     medians = np.median(chains, axis=0)
+    median_dict = {}
     print(f'\nMedian parameter estimates from PSRDISP:')
-    for pname, median in zip(param_names, medians):
-        print(f'\n\t{pname} = {median:.2f}')
+    for param, median in zip(params, medians):
+        print(f'\n\t{param.name} = {median:.2f}')
+        median_dict[param.name] = median
+    
+    medianfile = f'{chaindir}/{psrname}.psrdisp.median.noise.json'
+    print(f'\nSaving the median parameter estimates in {medianfile}')
+    with open(medianfile, 'w') as file:
+        json.dump(median_dict, file)
+    file.close()
         
     print(f'\nPlotting the posteriors')
     if truthsfile and os.path.isfile(truthsfile):
@@ -682,7 +687,6 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, chaindir, psrname,
                            f in open(truthsfile, 'r').readlines() if not f.startswith('#')])
     else:
         truths = None
-        
     fig = corner.corner(chains[Nburn:, :], labels=param_labels, 
                         label_kwargs={"fontsize": 14, 'fontweight':'bold'}, 
                         plot_datapoints=True, hist_kwargs={"density": True}, labelpad=0.05, 
@@ -691,22 +695,3 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, chaindir, psrname,
                         truths=truths, truth_color='crimson')
     plt.tight_layout()
     plt.savefig(f'{chaindir}/{psrname}.psrdisp.noise.pdf', dpi=200)
-
-## TBD
-# 1. Defining class for parameters -- DONE
-# 2. Defining a wrapper function to directly create parmaeters as per the file -- DONE
-# 3. Updating functions wherever the parameters are being accessed as a dictionary
-
-
-
-
-
-
-
-
-
-
-
-
-
-    

@@ -80,13 +80,11 @@ if __name__ == '__main__':
     print(f'\nPulsar Name: {psrname}')
     plot_dmseries(t, dms, dmerrs, outdir, psrname)
 
-    Tref_pos = np.longdouble(get_parfile_param(args.parfile, f'POSEPOCH'))*u.day.to(u.s)
     Tref_dm = np.longdouble(get_parfile_param(args.parfile, f'DMEPOCH'))*u.day.to(u.s)
     try: Tref_sw = np.longdouble(get_parfile_param(args.parfile, f'SWEPOCH'))*u.day.to(u.s)
     except Exception: Tref_sw = Tref_dm
 
     print(f'\nTime span of dataset = {Tspan*u.s.to(u.year):.2f} years')
-    print(f'\nPosition Reference Epoch = {Tref_pos*u.s.to(u.day)}')
     print(f'\nDM Reference Epoch = {Tref_dm*u.s.to(u.day)}')
     print(f'\nSW Reference Epoch = {Tref_sw*u.s.to(u.day)}')
     print(f'\nNumber of DMN harmonics = {args.DMNharm}')
@@ -103,36 +101,22 @@ if __name__ == '__main__':
         if not args.narrowband:
             if os.path.isfile(args.timfile):
                 print(f'\nGenerating ToAs using the tim file {args.timfile}')
-                psrtoas = get_toas_from_timfile()
+                psrtoas = make_fake_toas_fromtim(args.timfile, model=psrmodel, 
+                                                 add_noise=False, add_correlated_noise=False)
             else:
                 print(f'\nThe tim file {args.timfile} does not exist')
                 print(f'\nThe process will terminate')
                 sys.exit()
         else:
             print(f'\nGenerating ToAs using MJDs from the DM time series')
+            psrtoas = make_fake_toas_fromMJDs(t*u.s.to(u.day)*u.day, model=psrmodel, 
+                                              add_noise=False, add_correlated_noise=False
     
-    params = get_DispParams(args.paramfile)
+    params = get_DispParams(args.paramfile, flags)
     sample_noise(name=args.sampler, params=params, Nsamples=args.Nsamples, DMNharm=args.DMNharm, 
                  SWNharm=args.SWNharm, chaindir=chaindir, psrname=psrname, t=t, dms=dms, dmerrs=dmerrs, 
                  Tspan=Tspan, Tref_dm=Tref_dm, Tref_sw=Tref_sw, toas=psrtoas, flags=flags, 
-                 timing_model=psrmodel, plotchains=True, truthsfile=args.truthsfile)
+                 timing_model=psrmodel, fref=args.fref*u.MHz, plotchains=True, truthsfile=args.truthsfile)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    
+    process_finish = time.time()
+    print(f'\nThe process took {(process_finish-process_start)/60:.2f} minutes to finish')
