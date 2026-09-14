@@ -123,7 +123,7 @@ def get_freqs(Tspan, Nharm=None):
         Output: array of uniformly-spaced linear Fourier-frequencies
     '''
     if not Nharm:
-        print(f'\nSince no harmonics are providing, setting Nharm as per 1/month')
+        print(f'\nSince no harmonics are provided, setting Nharm as per 1/month')
         Tspan_years = Tspan*u.s.to(u.year)
         Nharm = int(np.floor(Tspan_years*12))
     
@@ -337,9 +337,9 @@ def get_lnpost(theta, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, fla
     '''
         Function to get the log-posterior for different paramters
         InParams: parameter sample vector, list of DispParam parameters, DMs in pc/cm^3, DM errors in pc/cm^3, 
-                  time array in s, time span in s, reference epoch for DM, reference epoch for SW, ToAs object (PINT), 
-                  list of DM flags, timing model object (PINT), DMN harmonics, SWN harmonics 
-                  and the chromatic reference frequency in MHz
+                  time array in s, time span in s, reference epoch for DM, reference epoch for SW, 
+                  ToAs object (PINT), list of DM flags, timing model object (PINT), DMN harmonics, 
+                  SWN harmonics and the chromatic reference frequency in MHz
         Output: the log-posterior value as per the parameter samples
     '''
     lnprior = get_lnprior(theta, params)
@@ -385,8 +385,9 @@ def get_lnlike_optimised(theta, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw,
     '''
         Function to get the log-likelihood in an optimised form for all the sampled parameters
         InParams: parameter sample vector, list of DispParam parameters, DMs in pc/cm^3, DM errors in pc/cm^3, 
-                  time array in s, time span in s, reference epoch for DM, reference epoch for SW, ToAs object (PINT), 
-                  list of DM flags, timing model object (PINT), DMN harmonics, and SWN harmonics.
+                  time array in s, time span in s, reference epoch for DM, reference epoch for SW, 
+                  ToAs object (PINT), list of DM flags, timing model object (PINT), DMN harmonics, 
+                  SWN harmonics and chromatic reference frequency in MHz.
         Output: the log-likelihood value as per the parameters
     '''
     N = get_Nmat(theta, dmerrs, params)
@@ -645,15 +646,16 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, chaindir, psrname,
             try:
                 with pc.parallel.MPIPool() as pool:
                     print(f'\nRunning with MPI-enabled pooling')
-                    sampler = pc.Sampler(prior=prior, likelihood=get_lnlike_optimised, likelhood_args=args,
+                    sampler = pc.Sampler(prior=prior, likelihood=get_lnlike_optimised, likelihood_args=args,
                                          n_effective=None, n_active=256, random_state=None, 
                                          pool=pool, output_dir=chaindir)
                     sampler.run(save_every=None, n_total=2048, n_evidence=2048)
                     chains, lnlike, lnpost = sampler.posterior(resample=True)
             except Exception:
                 print(f'\nRunning without MPI but using {os.cpu_count()} processors')
-                sampler = pc.Sampler(prior=prior, likelihood=get_lnlike_optimised, n_effective=None, 
-                                     n_active=256, random_state=None, pool=os.cpu_count(), output_dir=chaindir)
+                sampler = pc.Sampler(prior=prior, likelihood=get_lnlike_optimised, likelihood_args=args, 
+                                     n_effective=None, n_active=256, random_state=None, 
+                                     pool=os.cpu_count(), output_dir=chaindir)
                 sampler.run(save_every=None, n_total=2048, n_evidence=2048)
                 chains, lnlike, lnpost = sampler.posterior(resample=True)
 
