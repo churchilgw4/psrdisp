@@ -10,6 +10,8 @@ import sys
 from disputils import *
 from pint.models.model_builder import get_model
 from pint.simulation import make_fake_toas_fromtim, make_fake_toas_fromMJDs
+from pint.logging import setup
+_ = setup(level='ERROR')
 
 if __name__ == '__main__':
 
@@ -17,6 +19,9 @@ if __name__ == '__main__':
 
     # Parser Arguments
     parser = argparse.ArgumentParser(description = f'Options to run SPNA on epoch-wise DMs')
+    
+    parser.add_argument(f'--psrname', required=True, 
+                        help=f'Name of the pulsar')
     
     parser.add_argument(f'--parfile', required=True, 
                         help=f'Path to the pulsar timing ephermis file')
@@ -54,6 +59,9 @@ if __name__ == '__main__':
     parser.add_argument(f'--fref', type=float, default=1400, 
                         help=f'Reference chromatic frequency for transformations')
 
+    parser.add_argument(f'--plotchains', action=f'store_true', default=False, 
+                        help=f'Whether to plot the parameter chains')
+
     args = parser.parse_args()
 
     if args.outdir:
@@ -76,13 +84,23 @@ if __name__ == '__main__':
     t, dms, dmerrs, flags = read_dmfile(args.dmfile, return_flags=True)
     Tspan = t[-1] - t[0]
 
-    psrname = get_parfile_param(args.parfile, 'PSRJ')
-    print(f'\nPulsar Name: {psrname}')
-    plot_dmseries(t, dms, dmerrs, outdir, psrname)
+    print(f'\nPulsar Name: {args.psrname}')
+    plot_dmseries(t, dms, dmerrs, outdir, args.psrname)
 
-    Tref_dm = np.longdouble(get_parfile_param(args.parfile, f'DMEPOCH'))*u.day.to(u.s)
-    try: Tref_sw = np.longdouble(get_parfile_param(args.parfile, f'SWEPOCH'))*u.day.to(u.s)
-    except Exception: Tref_sw = Tref_dm
+    # Creating the timing model and ToAs object from PINT
+    psrmodel = get_model(parfile=args.parfile, allow_tcb=True, allow_T2=True)
+
+    try: Tref_dm = psrmodel.DMEPOCH.value*u.day.to(u.s)
+    except AttributeError:
+        print(f'\nThe DMEPOCH is not present in the timing model')
+        print(f'\nThe process will terminate')
+        sys.exit()
+
+    try: Tref_sw = psrmodel.SWEPOCH.value*u.day.to(u.s)
+    except AttributeError:
+        print(f'\nThe SWEPOCH is not present in the timing model')
+        print(f'\nSetting the SWEPOCH to be same as the DMEPOCH for {args.psrname}')
+        Tref_sw = Tref_dm
 
     print(f'\nTime span of dataset = {Tspan*u.s.to(u.year):.2f} years')
     print(f'\nDM Reference Epoch = {Tref_dm*u.s.to(u.day)}')
@@ -91,8 +109,6 @@ if __name__ == '__main__':
     print(f'\nNumber of SWN harmonics = {args.SWNharm}')
     print(f'\nDM groups as per the DM time series: {np.unique(flags)}')
 
-    # Creating the timing model and ToAs object from PINT
-    psrmodel = get_model(parfile=args.parfile, allow_tcb=True, allow_T2=True)
     if not args.narrowband and not args.timfile:
         print(f'\nA timfile must be provided for wideband DMs')
         print(f'\nThe process will terminate')
@@ -114,9 +130,10 @@ if __name__ == '__main__':
     
     params = get_DispParams(args.paramfile, flags)
     sample_noise(name=args.sampler, params=params, Nsamples=args.Nsamples, DMNharm=args.DMNharm, 
-                 SWNharm=args.SWNharm, chaindir=chaindir, psrname=psrname, t=t, dms=dms, dmerrs=dmerrs, 
-                 Tspan=Tspan, Tref_dm=Tref_dm, Tref_sw=Tref_sw, toas=psrtoas, flags=flags, 
-                 timing_model=psrmodel, fref=args.fref*u.MHz, plotchains=True, truthsfile=args.truthsfile)
+                 SWNharm=args.SWNharm, chaindir=chaindir, psrname=args.psrname, t=t, dms=dms, 
+                 dmerrs=dmerrs, Tspan=Tspan, Tref_dm=Tref_dm, Tref_sw=Tref_sw, toas=psrtoas, 
+                 flags=flags, timing_model=psrmodel, fref=args.fref*u.MHz, 
+                 plotchains=args.plotchains, truthsfile=args.truthsfile)
 
     process_finish = time.time()
     print(f'\nThe process took {(process_finish-process_start)/60:.2f} minutes to finish')

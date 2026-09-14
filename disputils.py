@@ -32,10 +32,15 @@ class DispParam:
         self._set_param_labels()
         
         if self.is_white:
-            self.name = f'{self.name}_{self.flag}'
+            if not np.any(self.mask):
+                print(f'\nNo compatible flag present in DMs for {self.name} with provided flag: {self.flag}')
+                print(f'\nThe process will terminate')
+                sys.exit()
+            else:
+                self.name = f'{self.name}_{self.flag}'
         else:
             self.mask = np.array([True for val in self.mask])
-            
+
         self._print_param_info()
 
     def __repr__(self):
@@ -138,15 +143,14 @@ def get_Nmat(theta, dmerrs, params):
     if not np.any(dispefacparams) and not np.any(dispequadparams):
         raise ValueError(f'No white noise parameters present in the noise model')
     else:
-        if not np.any(dispefacparams):
-            dispefacs = np.ones(dmerrs.size)
-            dispequads = np.concatenate([theta[param.idx]*np.ones(dmerrs.size)*param.mask 
-                                         for param in dispequadparams])
-        
-        if not np.any(dispequadparams):
+        dispefacs = np.ones(dmerrs.size)
+        dispequads = -np.inf*np.ones(dmerrs.size)
+        if np.any(dispefacparams):
             dispefacs = np.concatenate([theta[param.idx]*np.ones(dmerrs.size)*param.mask 
                                          for param in dispefacparams])
-            dispequads = -np.inf*np.ones(dmerrs.size)
+        if np.any(dispequadparams):
+            dispequads = np.concatenate([theta[param.idx]*np.ones(dmerrs.size)*param.mask 
+                             for param in dispequadparams])
 
         Nmat = np.array(dispefacs**2 * (dmerrs**2 + 10**(2*dispequads)))
         return Nmat
@@ -163,35 +167,6 @@ def powerlaw(f, Tspan, log10_A, gamma):
     pl = ((10**log10_A)**2/(12*np.pi**2*Tspan))*f**(-gamma)*fyr**(gamma-3)
     return pl
 
-def get_parfile_param(parfile, param):
-    '''
-        Function to get the pulsar ephemeris entry for a given parameter
-        InParams: path to the pulsar ephemeris file and parameter name
-        Output: the value of parameter as per the ephemeris file
-    '''
-    if os.path.isfile(parfile):
-        parlines = [f.split('\n')[0] for f in open(parfile, 'r').readlines() 
-                    if not f.startswith('#')]
-        
-        param_in_parfile = False
-        for line in parlines:
-            if param in line:
-                entries = line.split()
-                if param in entries:
-                    param_in_parfile = True
-                    paramval = entries[np.where(np.array(entries)==param)[0][0]+1]
-
-        if param_in_parfile:
-            return paramval
-        else:
-            print(f'\nThe parameter {param} is not present in the ephemeris file')
-            print(f'\nThe process will terminate')
-            sys.exit()
-    else:
-        print(f'\nThe pulsar ephmeris file {parfile} does not exist')
-        print(f'\nThe process will terminate')
-        sys.exit()
-
 def get_Phimat(theta, Tspan, params, DMNharm, SWNharm):
     '''
         Function to get the Gaussian Process kernel matrix for power-law processes
@@ -203,15 +178,23 @@ def get_Phimat(theta, Tspan, params, DMNharm, SWNharm):
     
     if dmnparams.size:
         f_dmn = get_freqs(Tspan, DMNharm)
-        log10_A_dmn = [par for par in dmnparams if par.name == 'TNDMAMP'][0]
-        gamma_dmn = [par for par in dmnparams if par.name == 'TNDMGAM'][0]
+        try: log10_A_dmn = [par for par in dmnparams if par.name == 'TNDMAMP'][0]
+        except Exception as e:
+            raise ValueError(f'Cannot extract DMN amplitude from parameter file')
+        try: gamma_dmn = [par for par in dmnparams if par.name == 'TNDMGAM'][0]
+        except Exception as e:
+            raise ValueError(f'Cannot extract DMN spectral index from parameter file')
     else:
         f_dmn = np.zeros(0)
 
     if swnparams.size:
         f_swn = get_freqs(Tspan, SWNharm)
-        log10_A_swn = [par for par in swnparams if par.name == 'TNSWAMP'][0]
-        gamma_swn = [par for par in swnparams if par.name == 'TNSWGAM'][0]
+        try: log10_A_swn = [par for par in swnparams if par.name == 'TNSWAMP'][0]
+        except Exception as e:
+            raise ValueError(f'Cannot extract SWN amplitude from parameter file')
+        try: gamma_swn = [par for par in swnparams if par.name == 'TNSWGAM'][0]
+        except Exception as e:
+            raise ValueError(f'Cannot extract SWN spectral index from parameter file')
     else:
         f_swn = np.zeros(0)
 
@@ -234,15 +217,15 @@ def get_Phimat(theta, Tspan, params, DMNharm, SWNharm):
 
     return np.array(Phi)
 
-def get_Umat(t, f, Tspan, Tref_dm, Tref_sw, params, toas, timing_model, fref):
+def get_Umat(t, Tspan, Tref_dm, Tref_sw, params, toas, timing_model, DMNharm, SWNharm, fref):
     '''
         Function to get the basis matrix for Fourier domain red noise process
         This implementation considers SWEPOCH to be the same as the DMEPOCH
         Also, the entries for DMGP and SWGP are scaled with fref**2/DMconst to make them coherent
         with the definitions in ENTERPRSIE (taking fref as 1400 MHz for comparison)
-        InParams: time in s, Fourier frequencies in 1/s, time span in s, DM reference epoch in s, 
-                  SW reference epoch in s, list of DispParam parameters, ToAs object (PINT), 
-                  timing model onject (PINT), and chromatic reference frequency in MHz
+        InParams: time in s, time span in s, DM reference epoch in s, SW reference epoch in s, 
+                  list of DispParam parameters, ToAs object (PINT), timing model onject (PINT) 
+                  and chromatic reference frequency in MHz
         Output: the DM basis matrix
     '''
 
@@ -316,7 +299,12 @@ def get_swdetsignal(t, Tref_sw, toas, timing_model, theta, params):
         for param, order in zip(swdetparams, orders):
             signal += get_dm_sw(toas, timing_model, theta[param.idx])*((t-Tref_sw)*u.s.to(u.year))**order/factorial(order)
 
-    fid_dm = float(get_parfile_param(parfile, 'DM'))
+    try: fid_dm = timing_model.DM.value
+    except AttributeError:
+        print(f'\nNo fiducial DM present in the timing model')
+        print(f'\nUsing DM = 0 as reference')
+        fid_dm = 0.0
+        
     signal += fid_dm
     return signal
 
@@ -337,8 +325,8 @@ def get_lnprior(theta, params):
         Output: the log-prior value as per the parameter samples
     '''
 
-    mins = np.array([param.min for param in params])
-    maxs = np.array([param.max for param in params])
+    mins = np.array([float(param.min) for param in params])
+    maxs = np.array([float(param.max) for param in params])
     
     lnprior = np.sum([np.log(UniformPrior(value, pmin, pmax)) for value, pmin, pmax in zip(theta, mins, maxs)])
 
@@ -360,8 +348,8 @@ def get_lnpost(theta, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, fla
         # This allows the code to not compute the likelihood for params outside the prior range
         return lnprior
     else:
-        return lnprior + get_lnlike_optimised(theta, params, dms, dmerrs, t, Tspan, Tref_dm, toas, flags, 
-                                              timing_model, DMNharm, SWNharm, fref)
+        return lnprior + get_lnlike_optimised(theta, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, 
+                                              flags, timing_model, DMNharm, SWNharm, fref)
 
 def prior_transform(params, show=True, theta=None):
     '''
@@ -377,10 +365,10 @@ def prior_transform(params, show=True, theta=None):
     else:
         raise TypeError(f'A list of DispParam parameters should be provided')
     
-    mins = np.array([param.min for param in params])
-    maxs = np.array([param.max for param in params])
+    mins = np.array([float(param.min) for param in params])
+    maxs = np.array([float(param.max) for param in params])
     spans = maxs - mins
-    if not theta:
+    if not np.any(theta):
         priors = np.array([stats.uniform(loc=low, scale=span) for low, span in zip(mins, spans)])
         if show:
             print(f'\nPrior Distributions:')
@@ -402,8 +390,8 @@ def get_lnlike_optimised(theta, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw,
         Output: the log-likelihood value as per the parameters
     '''
     N = get_Nmat(theta, dmerrs, params)
-    Phi = get_Phimat(theta, Tspan, params)
-    U = get_Umat(t, f, Tspan, Tref_dm, Tref_sw, params, toas, timing_model, fref)
+    Phi = get_Phimat(theta, Tspan, params, DMNharm, SWNharm)
+    U = get_Umat(t, Tspan, Tref_dm, Tref_sw, params, toas, timing_model, DMNharm, SWNharm, fref)
     swdet = get_swdetsignal(t, Tref_sw, toas, timing_model, theta, params)
     y = dms - swdet
     
@@ -441,8 +429,8 @@ def get_realisation(theta, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw,
         Output: an array of a random time-domain realisation of the stochastic processes
     '''
     N = get_Nmat(theta, dmerrs, params)
-    Phi = get_Phimat(theta, Tspan, params)
-    U = get_Umat(t, f, Tspan, Tref_dm, Tref_sw, params, toas, timing_model, fref)
+    Phi = get_Phimat(theta, Tspan, params, DMNharm, SWNharm)
+    U = get_Umat(t, Tspan, Tref_dm, Tref_sw, params, toas, timing_model, DMNharm, SWNharm, fref)
     swdet = get_swdetsignal(t, Tref_sw, toas, timing_model, theta, params)
     y = dms - swdet
 
@@ -479,7 +467,7 @@ def read_dmfile(dmfile, return_flags=False):
                            f in filelines])
 
         if not return_flags:
-            return t, dms, dmerrs
+            return t, dms, dmerrs, None
 
         else:
             # If there are only few epochs with specific flags
@@ -549,11 +537,15 @@ def plot_realisations(n_realisations, chains, params, dms, dmerrs, t, Tspan, Tre
         dist = np.random.normal(loc=median, scale=threshold*np.abs(sigma), size=n_realisations)
         param_choices[:, param.idx] = np.random.choice(dist, size=n_realisations)
 
-    DM = float(get_parfile_param(parfile, 'DM'))
-    try: DM1 = float(get_parfile_param(parfile, 'DM1'))
-    except Exception: DM1 = 0.0
-    try: DM2 = float(get_parfile_param(parfile, 'DM2'))
-    except Exception: DM2 = 0.0
+    try: DM = timing_model.DM.value
+    except AttributeError:
+        print(f'\nNo fiducial DM present in the timing model')
+        print(f'\nUsing DM = 0 as reference')
+        DM = 0.0
+    try: DM1 = timing_model.DM1.value
+    except AttributeError: DM1 = 0.0
+    try: DM2 = timing_model.DM2.value
+    except AttributeError: DM2 = 0.0
 
     DMdet_signal = DM + DM1*(t-Tref_dm)*u.s.to(u.year) + DM2*0.5*((t-Tref_dm)*u.s.to(u.year))**2
     
@@ -602,7 +594,7 @@ def plot_realisations(n_realisations, chains, params, dms, dmerrs, t, Tspan, Tre
 
 def sample_noise(name, params, Nsamples, DMNharm, SWNharm, chaindir, psrname, 
                  t, dms, dmerrs, Tspan, Tref_dm, Tref_sw, toas, flags, 
-                 timing_model, fref, plotchains=False, truthsfile=None):
+                 timing_model, fref, plotchains, truthsfile):
     '''
         Function to sample the posteriors of dispersive noise processes
         InParams: Sampler name, list of DispParam parameters, Number of emcee samples per walker, 
@@ -619,8 +611,9 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, chaindir, psrname,
     args = (params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, timing_model, DMNharm, SWNharm, fref)
     if os.path.isfile(chainfile):
         print(f'\nUsing the existing chains from {chainfile}')
-        chains = np.loadtxt(chainfile)
+        chains = np.load(chainfile)
     else:
+        print(f'\nUsing the {name} sampler to sample the parameter posteriors')
         if name == 'emcee':
             Nburn = Nsamples//4
             Nthin = 2
@@ -631,20 +624,19 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, chaindir, psrname,
             with mp.Pool() as pool:
                 sampler = emcee.EnsembleSampler(Nwalkers, Ndim, get_lnpost, 
                                                 args=args, pool=pool)
-                sampler.reset()
-                sampler.run_mcmc(p0, Nsamples, progress=True, store=False)
+                sampler.run_mcmc(p0, Nsamples, progress=True, store=True)
                 chains = sampler.get_chain(flat=True, discard=Nburn, thin=Nthin)
                 print(f'\nPlotting the chains for all parameters')
                 if plotchains:
                     for dim in range(Ndim):
                         plt.figure(figsize=(10, 3), dpi=100)
-                        plt.plot(chains[Nburn:, Ndim], color='crimson', alpha=0.3)
+                        plt.plot(chains[Nburn:, dim], color='crimson', alpha=0.3)
                         plt.xlabel(f'Samples', fontweight='bold', fontsize=10)
                         plt.ylabel(f'Value', fontweight='bold', fontsize=10)
-                        plt.title(f'{param[dim].label}', fontweight='bold', fontsize=13)
+                        plt.title(f'{params[dim].label}', fontweight='bold', fontsize=13)
                         plt.grid(True, alpha=0.5, ls='dashed')
                         plt.tight_layout()
-                        plt.savefig(f'{chaindir}/{psrname}.{params[dim].name}.chains.pdf', dpi=150)
+                        plt.savefig(f'{chaindir}/{params[dim].name}.chains.pdf', dpi=150)
         
         elif name == 'pocomc':
             Nburn = 0
@@ -687,7 +679,7 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, chaindir, psrname,
                            f in open(truthsfile, 'r').readlines() if not f.startswith('#')])
     else:
         truths = None
-    fig = corner.corner(chains[Nburn:, :], labels=param_labels, 
+    fig = corner.corner(chains, labels=param_labels, 
                         label_kwargs={"fontsize": 14, 'fontweight':'bold'}, 
                         plot_datapoints=True, hist_kwargs={"density": True}, labelpad=0.05, 
                         quantiles=(0.16, 0.5, 0.84), color='steelblue', show_titles=True, 
