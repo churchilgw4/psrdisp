@@ -62,8 +62,20 @@ if __name__ == '__main__':
     parser.add_argument(f'--plotchains', action=f'store_true', default=False, 
                         help=f'Whether to plot the parameter chains')
 
-    parser.add_argument(f'--psd', type=str, default='powerlaw', 
+    parser.add_argument(f'--psd', type=str, default=f'powerlaw', 
                         help=f'Power Spectral Density of the GP')
+
+    parser.add_argument(f'--plot_realisations', action=f'store_true', default=False, 
+                        help=f'Whether to plot the reconstructed noise realisations')
+
+    parser.add_argument(f'--threshold', type=float, default=3.0, 
+                        help=f'Threshold in units of sigma to construct distribution for realisations')
+
+    parser.add_argument(f'--add_dms', action=f'store_true', default=False, 
+                        help=f'Whether to plot the DM time series with realisations')
+
+    parser.add_argument(f'--n_realisations', type=int, default=20, 
+                        help=f'Number of realisations to be generated for the estimated parameters')
 
     args = parser.parse_args()
 
@@ -132,11 +144,23 @@ if __name__ == '__main__':
                                               add_noise=False, add_correlated_noise=False)
     
     params = get_DispParams(args.paramfile, flags)
+    dispefacparams = np.array([param for param in params if param.is_white and 'EFAC' in param.name])
+    dispequadparams = np.array([param for param in params if param.is_white and 'EQUAD' in param.name])
+    dmnparams = np.array([param for param in params if param.is_red and 'DM' in param.name])
+    swnparams = np.array([param for param in params if param.is_red and 'SW' in param.name])
+    swdetparams = [param for param in params if param.is_deterministic and 'NE_SW' in param.name]
+    orders = np.array([int(param.name.split('NE_SW')[-1]) if param.name.split('NE_SW')[-1] else 0 
+              for param in swdetparams])
+    
     sample_noise(name=args.sampler, params=params, Nsamples=args.Nsamples, DMNharm=args.DMNharm, 
-                 SWNharm=args.SWNharm, chaindir=chaindir, psrname=args.psrname, t=t, dms=dms, 
+                 SWNharm=args.SWNharm, outdir=outdir, chaindir=chaindir, psrname=args.psrname, t=t, dms=dms, 
                  dmerrs=dmerrs, Tspan=Tspan, Tref_dm=Tref_dm, Tref_sw=Tref_sw, toas=psrtoas, 
                  flags=flags, timing_model=psrmodel, fref=args.fref*u.MHz, 
-                 plotchains=args.plotchains, truthsfile=args.truthsfile)
-
+                 plotchains=args.plotchains, truthsfile=args.truthsfile, 
+                 dispefacparams=dispefacparams, dispequadparams=dispequadparams, 
+                 dmnparams=dmnparams, swnparams=swnparams, swdetparams=swdetparams, orders=orders, 
+                 plot_generated_realisations=args.plot_realisations, threshold=args.threshold, 
+                 add_dms=args.add_dms, n_realisations=args.n_realisations)
+    
     process_finish = time.time()
     print(f'\nThe process took {(process_finish-process_start)/60:.2f} minutes to finish')

@@ -1,4 +1,4 @@
-DISPEFAC 0.1 8.0 uniform
+DISPEFAC 0.1 8.0 uniform sample-flag
 TNDMAMP -16.0 -10.0 uniform
 TNDMGAM 0 8 uniform
 NE_SW 0 20 uniform

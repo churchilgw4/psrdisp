@@ -130,16 +130,13 @@ def get_freqs(Tspan, Nharm=None):
     f = np.linspace(1/Tspan, Nharm/Tspan, Nharm)
     return f
 
-def get_Nmat(theta, dmerrs, params):
+def get_Nmat(theta, dmerrs, dispefacparams, dispequadparams):
     '''
         Function to get the DM white-noise covariance matrix assuming logarithmic quadrature factors.
         Currently it does not support dense jitter-affected correlations
         InParams: parameter sample vector, DM errors in pc/cm^3, and a list of DispParam paramters
         Output: the DM White-noise covariance matrix
     '''
-    dispefacparams = np.array([param for param in params if param.is_white and 'EFAC' in param.name])
-    dispequadparams = np.array([param for param in params if param.is_white and 'EQUAD' in param.name])
-    
     if not np.any(dispefacparams) and not np.any(dispequadparams):
         raise ValueError(f'No white noise parameters present in the noise model')
     else:
@@ -189,15 +186,12 @@ def broken_powerlaw(f, log10_A, gamma, delta, fb, kappa):
     pl = hcf**2/(12*np.pi**2*f**3)
     return pl
 
-def get_Phimat(theta, Tspan, params, DMNharm, SWNharm, psd='powerlaw'):
+def get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd='powerlaw'):
     '''
         Function to get the Gaussian Process kernel matrix for power-law processes
         InParams: parameter sample vector, time span in s, and list of DispParam parameters
         Output: the GP kernel matrix for a PL spectrum with analytically marginalised DM Polynomial
     '''
-    dmnparams = np.array([param for param in params if param.is_red and 'DM' in param.name])
-    swnparams = np.array([param for param in params if param.is_red and 'SW' in param.name])
-    
     if dmnparams.size:
         f_dmn = get_freqs(Tspan, DMNharm)
         if psd == 'powerlaw':
@@ -242,7 +236,7 @@ def get_Phimat(theta, Tspan, params, DMNharm, SWNharm, psd='powerlaw'):
 
     return np.array(Phi)
 
-def get_Umat(t, Tspan, Tref_dm, Tref_sw, params, toas, timing_model, DMNharm, SWNharm, fref):
+def get_Umat(t, Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, toas, timing_model, DMNharm, SWNharm, fref):
     '''
         Function to get the basis matrix for Fourier domain red noise process
         This implementation considers SWEPOCH to be the same as the DMEPOCH
@@ -253,10 +247,6 @@ def get_Umat(t, Tspan, Tref_dm, Tref_sw, params, toas, timing_model, DMNharm, SW
                   and chromatic reference frequency in MHz
         Output: the DM basis matrix
     '''
-
-    dmnparams = np.array([param for param in params if param.is_red and 'DM' in param.name])
-    swnparams = np.array([param for param in params if param.is_red and 'SW' in param.name])
-    
     if dmnparams.size:
         f_dmn = get_freqs(Tspan, DMNharm)
         convfactor = fref**2/DMconst
@@ -305,17 +295,13 @@ def get_dm_sw(toas, timing_model, n_earth):
     
     return dm_sw
 
-def get_swdetsignal(t, Tref_sw, toas, timing_model, theta, params):
+def get_swdetsignal(t, Tref_sw, toas, timing_model, theta, swdetparams, orders):
     '''
         Function to get a deterministic signal for the solar-wind process
         InParams: time in s, SW reference epoch in s, ToAs object (PINT), 
                   timing model object (PINT), parameter sample vector and list of DispParam parameters
         Output: the DM contribution from deterministic SW process with a polynomial form
     '''
-    swdetparams = [param for param in params if param.is_deterministic and 'NE_SW' in param.name]
-    orders = [int(param.name.split('NE_SW')[-1]) if param.name.split('NE_SW')[-1] else 0 
-              for param in swdetparams]
-
     if not len(swdetparams):
         signal = np.zeros(t.size)
     else:
@@ -349,7 +335,6 @@ def get_lnprior(theta, params):
         InParams: parameter sample vector and list of DispParam parameters
         Output: the log-prior value as per the parameter samples
     '''
-
     mins = np.array([float(param.min) for param in params])
     maxs = np.array([float(param.max) for param in params])
     
@@ -358,7 +343,8 @@ def get_lnprior(theta, params):
     return lnprior
 
 def get_lnpost(theta, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, 
-               timing_model, DMNharm, SWNharm, fref):
+               timing_model, DMNharm, SWNharm, fref, dispefacparams, dispequadparams, 
+               dmnparams, swnparams, swdetparams, orders):
     '''
         Function to get the log-posterior for different paramters
         InParams: parameter sample vector, list of DispParam parameters, DMs in pc/cm^3, DM errors in pc/cm^3, 
@@ -370,11 +356,11 @@ def get_lnpost(theta, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, fla
     lnprior = get_lnprior(theta, params)
     
     if not np.isfinite(lnprior):
-        # This allows the code to not compute the likelihood for params outside the prior range
         return lnprior
     else:
-        return lnprior + get_lnlike_optimised(theta, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, 
-                                              flags, timing_model, DMNharm, SWNharm, fref)
+        return lnprior + get_lnlike_optimised(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, 
+                                              timing_model, DMNharm, SWNharm, fref, dispefacparams, dispequadparams, 
+                                              dmnparams, swnparams, swdetparams, orders)
 
 def prior_transform(params, show=True, theta=None):
     '''
@@ -405,8 +391,9 @@ def prior_transform(params, show=True, theta=None):
     
     return priors
 
-def get_lnlike_optimised(theta, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, 
-                         timing_model, DMNharm, SWNharm, fref):
+def get_lnlike_optimised(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, 
+                         timing_model, DMNharm, SWNharm, fref, dispefacparams, dispequadparams, 
+                         dmnparams, swnparams, swdetparams, orders):
     '''
         Function to get the log-likelihood in an optimised form for all the sampled parameters
         InParams: parameter sample vector, list of DispParam parameters, DMs in pc/cm^3, DM errors in pc/cm^3, 
@@ -415,10 +402,10 @@ def get_lnlike_optimised(theta, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw,
                   SWN harmonics and chromatic reference frequency in MHz.
         Output: the log-likelihood value as per the parameters
     '''
-    N = get_Nmat(theta, dmerrs, params)
-    Phi = get_Phimat(theta, Tspan, params, DMNharm, SWNharm)
-    U = get_Umat(t, Tspan, Tref_dm, Tref_sw, params, toas, timing_model, DMNharm, SWNharm, fref)
-    swdet = get_swdetsignal(t, Tref_sw, toas, timing_model, theta, params)
+    N = get_Nmat(theta, dmerrs, dispefacparams, dispequadparams)
+    Phi = get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm)
+    U = get_Umat(t, Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, toas, timing_model, DMNharm, SWNharm, fref)
+    swdet = get_swdetsignal(t, Tref_sw, toas, timing_model, theta, swdetparams, orders)
     y = dms - swdet
     
     Ninv_y = y / N
@@ -445,8 +432,9 @@ def get_lnlike_optimised(theta, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw,
 
     return lnlike
 
-def get_realisation(theta, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, 
-                    toas, flags, timing_model, DMNharm, SWNharm, fref):
+def get_realisation(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, 
+                    timing_model, DMNharm, SWNharm, fref, dispefacparams, dispequadparams, 
+                    dmnparams, swnparams, swdetparams, orders):
     '''
         Function to get a random time-domain realisation of stochastic noise processes
         InParams: parameter sample vector, list of DispParam parameters, DMs in pc/cm^3, DM errors in pc/cm^3, 
@@ -454,10 +442,10 @@ def get_realisation(theta, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw,
                   list of DM flags, timing model object (PINT), DMN harmonics, and SWN harmonics.
         Output: an array of a random time-domain realisation of the stochastic processes
     '''
-    N = get_Nmat(theta, dmerrs, params)
-    Phi = get_Phimat(theta, Tspan, params, DMNharm, SWNharm)
-    U = get_Umat(t, Tspan, Tref_dm, Tref_sw, params, toas, timing_model, DMNharm, SWNharm, fref)
-    swdet = get_swdetsignal(t, Tref_sw, toas, timing_model, theta, params)
+    N = get_Nmat(theta, dmerrs, dispefacparams, dispequadparams)
+    Phi = get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm)
+    U = get_Umat(t, Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, toas, timing_model, DMNharm, SWNharm, fref)
+    swdet = get_swdetsignal(t, Tref_sw, toas, timing_model, theta, swdetparams, orders)
     y = dms - swdet
 
     Ninv_U = U / N[:, None]
@@ -536,9 +524,10 @@ def plot_dmseries(t, dms, dmerrs, outdir, psrname):
     plt.tight_layout()
     plt.savefig(f'{outdir}/{psrname}.DM.time.series.pdf', dpi=200)
 
-def plot_realisations(n_realisations, chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, 
-                      flags, parfile, DMNharm, SWNharm, outdir, psrname, toas, timing_model, 
-                      save=True, add_dms=False, no_title=True, threshold=3.0):
+def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, 
+                      flags, DMNharm, SWNharm, fref, outdir, psrname, toas, timing_model, 
+                      dispefacparams, dispequadparams, dmnparams, swnparams, swdetparams, orders, 
+                      threshold, add_dms, n_realisations, save=True, no_title=True):
     '''
         Function to plot the time-domain realisations of the full DM process including stochastic noises
         InParams: number of realisations to be plotted, posterior chains of sampled parameters, 
@@ -557,9 +546,9 @@ def plot_realisations(n_realisations, chains, params, dms, dmerrs, t, Tspan, Tre
         map = np.max(chains[:, param.idx])
         param.set_values(median=median, sigma=sigma, map=map)
         print(f'\n{param.name}:')
-        print(f'\n\tMedian value = {param.median:.4f}')
-        print(f'\n\tStandard Deviation = {param.sigma:.4f}')
-        print(f'\n\tMaximum a-posteriori value = {param.map:.4f}')
+        print(f' - Median value = {param.median:.4f}')
+        print(f' - Standard Deviation = {param.sigma:.4f}')
+        print(f' - Maximum a-posteriori value = {param.map:.4f}')
         dist = np.random.normal(loc=median, scale=threshold*np.abs(sigma), size=n_realisations)
         param_choices[:, param.idx] = np.random.choice(dist, size=n_realisations)
 
@@ -578,26 +567,26 @@ def plot_realisations(n_realisations, chains, params, dms, dmerrs, t, Tspan, Tre
     # The realisations only provide the variations due to the stochastic processes
     full_signal = np.zeros((n_realisations, t.size))
     for i in range(n_realisations):
-        realisation = get_realisation(param_choices[i, :], params, dms, dmerrs, t, Tspan, 
-                                      Tref_dm, Tref_sw, toas, flags, timing_model, 
-                                      DMNharm, SWNharm, fref)
-        SWdet_signal = get_swdetsignal(t, Tref_sw, toas, timing_model, param_choices[i, :], params) - DM
+        realisation = get_realisation(param_choices[i, :], dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, 
+                                      flags, timing_model, DMNharm, SWNharm, fref, dispefacparams, dispequadparams, 
+                                      dmnparams, swnparams, swdetparams, orders)
+        SWdet_signal = get_swdetsignal(t, Tref_sw, toas, timing_model, param_choices[i, :], swdetparams, orders) - DM
         full_signal[i, :] = DMdet_signal + SWdet_signal + realisation
 
     if add_dms:
-        fig, ax = plt.subplots(figsize=(10, 5), dpi=100, nrows=1, ncols=1, sharex=True)
+        fig, ax = plt.subplots(figsize=(10, 4), dpi=100, nrows=1, ncols=1, sharex=True)
         fig.subplots_adjust(wspace=0, hspace=0)
         ax.ticklabel_format(useOffset=False)
         ax.grid(ls='dashed')
         if not no_title:
             ax.set_title(rf'{psrname}, DM process realisations', fontweight='bold')
         for i in range(n_realisations):
-            ax.plot(t*u.s.to(u.day), full_signal[i, :], color='k', alpha=0.05)
+            ax.plot(t*u.s.to(u.day), full_signal[i, :], color='k', alpha=0.07)
         ax.ticklabel_format(useOffset=False)
         ax.grid(ls='dashed')
         _ = ax.set_ylabel(rf'DM [pc/cm$^3$]', fontweight='bold', fontsize=13)
         _ = ax.set_xlabel(f'MJD', fontweight='bold', fontsize=13)
-        ax.errorbar(t*u.s.to(u.day), dms, yerr=dmerrs, fmt='o', ms=4, c='crimson', alpha=0.3, \
+        ax.errorbar(t*u.s.to(u.day), dms, yerr=dmerrs, fmt='o', ms=7, c='crimson', alpha=0.1, \
                          elinewidth=1.0, capsize=2, capthick=0.5, ecolor='k', label='Simulated DM')
         ax.legend(loc='upper left')
         plt.tight_layout()
@@ -605,7 +594,7 @@ def plot_realisations(n_realisations, chains, params, dms, dmerrs, t, Tspan, Tre
             plt.savefig(f'{outdir}/{psrname}.realisations.pdf', dpi=200)
 
     else:
-        fig = plt.figure(figsize=(10, 5), dpi=100)
+        fig = plt.figure(figsize=(10, 4), dpi=100)
         plt.ticklabel_format(useOffset=False)
         plt.grid(ls='dashed')
         _ = plt.xlabel(f'MJD', fontweight='bold', fontsize=13)
@@ -613,14 +602,15 @@ def plot_realisations(n_realisations, chains, params, dms, dmerrs, t, Tspan, Tre
         if not no_title:
             plt.title(rf'{psrname}, DM process realisations', fontweight='bold')
         for i in range(n_realisations):
-            plt.plot(t*u.s.to(u.day), full_signal[i, :], color='k', alpha=0.01)
+            plt.plot(t*u.s.to(u.day), full_signal[i, :], color='k', alpha=0.07)
         plt.tight_layout()
         if save:
             plt.savefig(f'{outdir}/{psrname}.realisations.pdf', dpi=200)
 
-def sample_noise(name, params, Nsamples, DMNharm, SWNharm, chaindir, psrname, 
-                 t, dms, dmerrs, Tspan, Tref_dm, Tref_sw, toas, flags, 
-                 timing_model, fref, plotchains, truthsfile):
+def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psrname, t, dms, dmerrs, Tspan, 
+                 Tref_dm, Tref_sw, toas, flags, timing_model, fref, plotchains, truthsfile, dispefacparams, 
+                 dispequadparams, dmnparams, swnparams, swdetparams, orders, plot_generated_realisations, 
+                 threshold, add_dms, n_realisations):
     '''
         Function to sample the posteriors of dispersive noise processes
         InParams: Sampler name, list of DispParam parameters, Number of emcee samples per walker, 
@@ -634,7 +624,8 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, chaindir, psrname,
     chainfile = f'{chaindir}/{psrname}.psrdisp.chains.npy'
     param_names = [param.name for param in params]
     param_labels = [param.label for param in params]
-    args = (params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, timing_model, DMNharm, SWNharm, fref)
+    args = (params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, timing_model, DMNharm, SWNharm, fref, 
+            dispefacparams, dispequadparams, dmnparams, swnparams, swdetparams, orders)
     if os.path.isfile(chainfile):
         print(f'\nUsing the existing chains from {chainfile}')
         chains = np.load(chainfile)
@@ -671,14 +662,14 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, chaindir, psrname,
             try:
                 with pc.parallel.MPIPool() as pool:
                     print(f'\nRunning with MPI-enabled pooling')
-                    sampler = pc.Sampler(prior=prior, likelihood=get_lnlike_optimised, likelihood_args=args,
+                    sampler = pc.Sampler(prior=prior, likelihood=get_lnlike_optimised, likelihood_args=args[1:],
                                          n_effective=None, n_active=256, random_state=None, 
                                          pool=pool, output_dir=chaindir)
                     sampler.run(save_every=None, n_total=2048, n_evidence=2048)
                     chains, lnlike, lnpost = sampler.posterior(resample=True)
             except Exception:
                 print(f'\nRunning without MPI but using {os.cpu_count()} processors')
-                sampler = pc.Sampler(prior=prior, likelihood=get_lnlike_optimised, likelihood_args=args, 
+                sampler = pc.Sampler(prior=prior, likelihood=get_lnlike_optimised, likelihood_args=args[1:], 
                                      n_effective=None, n_active=256, random_state=None, 
                                      pool=os.cpu_count(), output_dir=chaindir)
                 sampler.run(save_every=None, n_total=2048, n_evidence=2048)
@@ -713,4 +704,13 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, chaindir, psrname,
                         title_kwargs={"fontsize": 12, 'fontweight':'bold'}, 
                         truths=truths, truth_color='crimson')
     plt.tight_layout()
-    plt.savefig(f'{chaindir}/{psrname}.psrdisp.noise.pdf', dpi=200)
+    plt.savefig(f'{outdir}/{psrname}.psrdisp.noise.pdf', dpi=200)
+
+    if plot_generated_realisations:
+        print(f'\nPlotting {n_realisations} realisations of the process with {threshold} sigma threshold')
+        plot_realisations(chains=chains, params=params, dms=dms, dmerrs=dmerrs, t=t, Tspan=Tspan, 
+                          Tref_dm=Tref_dm, Tref_sw=Tref_sw, flags=flags, DMNharm=DMNharm, SWNharm=SWNharm, 
+                          fref=fref, outdir=outdir, psrname=psrname, toas=toas, timing_model=timing_model, 
+                          dispefacparams=dispefacparams, dispequadparams=dispequadparams, dmnparams=dmnparams, 
+                          swnparams=swnparams, swdetparams=swdetparams, orders=orders, threshold=threshold, 
+                          add_dms=add_dms, n_realisations=n_realisations)
