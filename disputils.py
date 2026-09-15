@@ -160,14 +160,36 @@ def powerlaw(f, Tspan, log10_A, gamma):
         Function to get the Fourier-domain power-law for a given basis
         InParams: array of linear Fourier-frequencies, Time span in seconds, 
                   power-law amplitude and spectral index
-        Output: the Power Spectral Density of a Fourier-domain spectral process
+        Output: the Power Spectral Density of a Fourier-domain free-spectral process
     '''
     yr = 1*u.year.to(u.s)
     fyr = 1/yr
     pl = ((10**log10_A)**2/(12*np.pi**2*Tspan))*f**(-gamma)*fyr**(gamma-3)
     return pl
 
-def get_Phimat(theta, Tspan, params, DMNharm, SWNharm):
+def free_spectrum(log10_rho):
+    '''
+        Function to get the free-spectrum density for a given basis
+        InParams: time span in s and free spectrum components
+        Output: the Power Spectral Density of a free-spectrum process
+    '''
+    return 10**(2*log10_rho)
+
+def broken_powerlaw(f, log10_A, gamma, delta, fb, kappa):
+    '''
+        Function to get the broken-powerlaw spectral density for a given basis
+        InParams: array of linear Fourier-frequencies, power-law amplitude, pre-break spectral
+                  index (for f<f_b), post-break spectral index (for f>f_b), transition frequency in 1/s
+                  and smoothness of transition.
+        Output: the Power Spectral Dnesity of a Fourier-dommain broken-powerlaw process
+    '''
+    yr = 1*u.year.to(u.s)
+    fyr = 1/yr
+    hcf = 10**(log10_A)*((f/fyr)**((3-gamma)/2))*(1+(f/fb)**(1/kappa))**(kappa*(gamma-delta)/2)
+    pl = hcf**2/(12*np.pi**2*f**3)
+    return pl
+
+def get_Phimat(theta, Tspan, params, DMNharm, SWNharm, psd='powerlaw'):
     '''
         Function to get the Gaussian Process kernel matrix for power-law processes
         InParams: parameter sample vector, time span in s, and list of DispParam parameters
@@ -178,23 +200,25 @@ def get_Phimat(theta, Tspan, params, DMNharm, SWNharm):
     
     if dmnparams.size:
         f_dmn = get_freqs(Tspan, DMNharm)
-        try: log10_A_dmn = [par for par in dmnparams if par.name == 'TNDMAMP'][0]
-        except Exception as e:
-            raise ValueError(f'Cannot extract DMN amplitude from parameter file')
-        try: gamma_dmn = [par for par in dmnparams if par.name == 'TNDMGAM'][0]
-        except Exception as e:
-            raise ValueError(f'Cannot extract DMN spectral index from parameter file')
+        if psd == 'powerlaw':
+            try: log10_A_dmn = [par for par in dmnparams if par.name == 'TNDMAMP'][0]
+            except Exception as e:
+                raise ValueError(f'Cannot extract DMN amplitude from parameter file')
+            try: gamma_dmn = [par for par in dmnparams if par.name == 'TNDMGAM'][0]
+            except Exception as e:
+                raise ValueError(f'Cannot extract DMN spectral index from parameter file')
     else:
         f_dmn = np.zeros(0)
 
     if swnparams.size:
         f_swn = get_freqs(Tspan, SWNharm)
-        try: log10_A_swn = [par for par in swnparams if par.name == 'TNSWAMP'][0]
-        except Exception as e:
-            raise ValueError(f'Cannot extract SWN amplitude from parameter file')
-        try: gamma_swn = [par for par in swnparams if par.name == 'TNSWGAM'][0]
-        except Exception as e:
-            raise ValueError(f'Cannot extract SWN spectral index from parameter file')
+        if psd == 'powerlaw':
+            try: log10_A_swn = [par for par in swnparams if par.name == 'TNSWAMP'][0]
+            except Exception as e:
+                raise ValueError(f'Cannot extract SWN amplitude from parameter file')
+            try: gamma_swn = [par for par in swnparams if par.name == 'TNSWGAM'][0]
+            except Exception as e:
+                raise ValueError(f'Cannot extract SWN spectral index from parameter file')
     else:
         f_swn = np.zeros(0)
 
@@ -204,6 +228,7 @@ def get_Phimat(theta, Tspan, params, DMNharm, SWNharm):
     if f_dmn.size:
         dmn = np.zeros(2*f_dmn.size)
         for i in range(f_dmn.size):
+            
             dmn[2*i] = dmn[2*i+1] = powerlaw(f_dmn[i], Tspan, log10_A=theta[log10_A_dmn.idx], 
                                              gamma=theta[gamma_dmn.idx])
         Phi.extend(dmn)

@@ -62,6 +62,9 @@ if __name__ == '__main__':
     parser.add_argument(f'--plotchains', action=f'store_true', default=False, 
                         help=f'Whether to plot the parameter chains')
 
+    parser.add_argument(f'--psd', type=str, default='powerlaw', 
+                        help=f'Power Spectral Density of the GP')
+
     args = parser.parse_args()
 
     if args.outdir:
