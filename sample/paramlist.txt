@@ -1,4 +1,6 @@
-# pname [lowercase for GPs], pmin, pmax, pdist, [pflag]
-DMEFAC 0.1 8.0 uniform
-gamma_gp_dm 0 7 uniform
-log10_A_gp_dm -16.0 -10.0 uniform
+DISPEFAC 0.1 8.0 uniform
+TNDMAMP -16.0 -10.0 uniform
+TNDMGAM 0 8 uniform
+NE_SW 0 20 uniform
+NE_SW1 -20 20 uniform
+NE_SW2 -20 20 uniform

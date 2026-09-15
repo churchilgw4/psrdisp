@@ -1,9 +1,0 @@
-DISPEFAC 0.1 8.0 uniform pulsar_sim_det-dmn
-# DISPEQUAD 0.1 8.0 uniform pulsar_sim_det-dmn
-TNDMAMP -16.0 -10.0 uniform
-TNDMGAM 0 8 uniform
-# TNSWAMP -8.0 -4.0 uniform
-# TNSWGAM 0 8 uniform
-NE_SW 0 20 uniform
-NE_SW1 -20 20 uniform
-NE_SW2 -20 20 uniform

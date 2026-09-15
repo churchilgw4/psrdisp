@@ -1,4 +1,7 @@
-# The order should be in sorted fashion as the parameter list
-DMEFAC 1.0
-gamma_gp_dm 2.5
-log10_A_gp_dm -14.0
+DISPEFAC 1.2
+DISPEQUAD -6.0
+TNDMAMP -13.5
+TNDMGAM 3.0
+NE_SW 2.0
+NE_SW1 1.0
+NE_SW2 0.75

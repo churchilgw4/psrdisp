@@ -1,7 +1,0 @@
-DISPEFAC 0.1 8.0 uniform tempflag
-DISPEQUAD 0.1 8.0 uniform tempflag
-TNDMAMP -16.0 -10.0 uniform
-TNDMGAM 0 8 uniform
-TNSWAMP -8.0 -4.0 uniform
-TNSWAMP 0 8 uniform
-NE_SW -20 20 uniform
