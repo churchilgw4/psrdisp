@@ -12,6 +12,7 @@ import pocomc as pc
 from scipy import stats
 import json
 from math import factorial
+_cache = {}
 
 class DispParam:
     '''
@@ -400,18 +401,23 @@ def get_swdetsignal(t, Tref_sw, toas, timing_model, theta, swdetparams, orders, 
         Output: the DM contribution from deterministic SW process with a polynomial form
     '''
     if not len(swdetparams):
-        signal = np.zeros(t.size)
+        if not vectorise:
+            signal = np.zeros(t.size)
+        else:
+            signal = np.zeros((theta.shape[0], t.size))
     else:
         if not vectorise:
             signal = np.zeros(t.size)
             for param, order in zip(swdetparams, orders):
                 signal += get_dm_sw(toas, timing_model, 
-                                    theta[param.idx])*((t-Tref_sw)*u.s.to(u.year))**order/factorial(order)
+                                    theta[param.idx], 
+                                    vectorise)*((t-Tref_sw)*u.s.to(u.year))**order/factorial(order)
         else:
             signal = np.zeros((theta.shape[0], t.size))
             for param, order in zip(swdetparams, orders):
                 signal += get_dm_sw(toas, timing_model, 
-                                    theta[:, param.idx])*((t-Tref_sw)*u.s.to(u.year))**order/factorial(order)
+                                    theta[:, param.idx], 
+                                    vectorise)*((t-Tref_sw)*u.s.to(u.year))**order/factorial(order)
 
     try: fid_dm = timing_model.DM.value
     except AttributeError:
@@ -475,9 +481,9 @@ def get_lnprior(theta, params, vectorise=False):
         lnprior = np.sum([np.log(UniformPrior(value, pmin, pmax)) for 
                           value, pmin, pmax in zip(theta, mins, maxs)])
     else:
-        lnprior = np.sum([np.log(UniformPrior(value, pmin, pmax)) for 
-                          value, pmin, pmax in zip(theta, mins, maxs)], axis=1)
-
+        lnprior = np.sum([[np.log(UniformPrior(value, pmin, pmax)) for 
+                          value, pmin, pmax in zip(theta[idx, :], mins, maxs)]
+                          for idx in range(theta.shape[0])], axis=1)
     return lnprior
 
 def get_lnpost(theta, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, 
@@ -494,7 +500,7 @@ def get_lnpost(theta, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, fla
                   flag to vectorise the likelihood computations
         Output: the log-posterior value as per the parameter samples
     '''
-    lnprior = get_lnprior(theta, params)
+    lnprior = get_lnprior(theta, params, vectorise)
     
     if not np.any(np.isfinite(lnprior)):
         return lnprior
@@ -518,6 +524,11 @@ def get_lnlike_optimised(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, f
                   flag to vectorise the likelihood computations
         Output: the log-likelihood value as per the parameters
     '''
+    key = tuple(np.round(theta, 10))
+    if not vectorise:
+        if key in _cache.keys():
+            return _cache[key]
+    
     N = get_Nmat(theta, dmerrs, dispefacparams, dispequadparams, vectorise=vectorise)
     Phi = get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, vectorise=vectorise)
     swdet = get_swdetsignal(t, Tref_sw, toas, timing_model, theta, swdetparams, orders, vectorise=vectorise)
@@ -542,31 +553,33 @@ def get_lnlike_optimised(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, f
             lnlike = -0.5*(y_Cinv_y + logdet_C)
         except Exception:
             lnlike = -np.inf
-    else:
-        Nwalkers, Nbasis = theta.shape[0], U.shape[1]
-        Ninv_y = y / N
-        y_Ninv_y = (y[:, None, :] @ Ninv_y[:, :, None]).squeeze((-1, -2))
-        Ninv_U = U[None, :, :] / N[:, :, None]
-        UT_Ninv_y = (U.T @ Ninv_y[:, :, None]).squeeze(-1)
-        UT_Ninv_U = U.T @ Ninv_U
-        Sigmainv = UT_Ninv_U
-        idx = np.arange(nbasis)
-        Sigmainv[:, idxs, idxs] += 1.0 / Phi
-        try:
-            L = np.linalg.cholesky(Sigmainv)
-            z = np.linalg.solve(L, UT_Ninv_y)
-            Sigmainv_UT_Ninv_y = np.linalg.solve(np.swapaxes(L, -1, -2), z)
-            y_Ninv_U_Sigma_UT_Ninv_y = (UT_Ninv_y[:, None, :] @ Sigmainv_UT_Ninv_y[:, :, None]).squeeze((-1, -2))
-            y_Cinv_y = y_Ninv_y - y_Ninv_U_Sigma_UT_Ninv_y
-            logdet_N = np.sum(np.log(N), axis=1)
-            L_diag = np.diagonal(L, axis1=-2, axis2=-1)
-            logdet_Sigmainv = 2 * np.sum(np.log(L_diag), axis=1)
-            logdet_Phi = np.sum(np.log(Phi), axis=1)
-            logdet_C = logdet_N + logdet_Sigmainv + logdet_Phi
-            lnlike = -0.5 * (y_Cinv_y + logdet_C)
-        except Exception:
-            lnlike = -np.inf*np.ones(Nwalkers)
-            
+        _cache[key] = lnlike
+        
+    else:        
+        lnlike = np.zeros(theta.shape[0])
+        for w in range(theta.shape[0]):
+            Nw = N[w]
+            Phiw = Phi[w]
+            yw = y[w]
+            Ninv_yw = yw / Nw
+            y_Ninv_yw = yw @ Ninv_yw
+            Ninv_Uw = U / Nw[:, None]
+            UT_Ninv_yw = Ninv_Uw.T @ yw
+            UT_Ninv_Uw = U.T @ Ninv_Uw
+            Sigmainvw = np.diag(1/Phiw) + UT_Ninv_Uw
+            try:
+                Sigmainv_cf = sl.cho_factor(Sigmainvw)
+                Sigmainv_UT_Ninv_yw = sl.cho_solve(Sigmainv_cf, UT_Ninv_yw)
+                y_Ninv_U_Sigma_UT_Ninv_yw = UT_Ninv_yw @ Sigmainv_UT_Ninv_yw
+                y_Cinv_yw = y_Ninv_yw - y_Ninv_U_Sigma_UT_Ninv_yw
+                logdet_Nw = np.sum(np.log(Nw))
+                logdet_Sigmainvw = 2*np.sum(np.log(np.diag(Sigmainv_cf[0])))
+                logdet_Phiw = np.sum(np.log(Phiw))
+                logdet_Cw = logdet_Nw + logdet_Sigmainvw + logdet_Phiw
+                lnlike[w] = -0.5*(y_Cinv_yw + logdet_Cw)
+            except Exception:
+                lnlike[w] = -np.inf
+    
     return lnlike
 
 def get_realisation(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, 
@@ -583,9 +596,9 @@ def get_realisation(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags,
                   flag to vectorise the likelihood computations
         Output: an array of a random time-domain realisation of the stochastic processes
     '''
-    N = get_Nmat(theta, dmerrs, dispefacparams, dispequadparams, vectorise)
-    Phi = get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, vectorise)
-    swdet = get_swdetsignal(t, Tref_sw, toas, timing_model, theta, swdetparams, orders, vectorise)
+    N = get_Nmat(theta, dmerrs, dispefacparams, dispequadparams, vectorise=vectorise)
+    Phi = get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, vectorise=vectorise)
+    swdet = get_swdetsignal(t, Tref_sw, toas, timing_model, theta, swdetparams, orders, vectorise=vectorise)
     y = dms - swdet
 
     Ninv_U = U / N[:, None]
@@ -689,7 +702,7 @@ def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw,
 def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psrname, t, dms, dmerrs, Tspan, 
                  Tref_dm, Tref_sw, toas, flags, timing_model, fref, plotchains, truthsfile, dispefacparams, 
                  dispequadparams, dmnparams, swnparams, swdetparams, orders, plot_generated_realisations, 
-                 threshold, add_dms, n_realisations, vectorise):
+                 threshold, add_dms, n_realisations, vectorise, use_pool):
     '''
         Function to sample the posteriors of dispersive noise processes
         InParams: Sampler name, list of DispParam parameters, Number of emcee samples per walker, 
@@ -701,8 +714,8 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psr
                   array pf DM noise parameters, array of SW noise parameters, array of deterministic SW parameters, 
                   array of their orders, flag to plot the generated realisations of the extracted processes, 
                   threshold for calculating the randomness in generated realisations, 
-                  flag to add DM time series to the realisations, number of realisations to be generated and
-                  flag to vectorise the likelihood evaluations
+                  flag to add DM time series to the realisations, number of realisations to be generated, 
+                  flag to vectorise the likelihood evaluations and flag to use multiprocessing pool
         Output: None
     '''
     Ndim = len(params)
@@ -724,43 +737,60 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psr
             print(f'\nNdim: {Ndim}, Nsamples (per walker): {Nsamples}, Nwalkers: {Nwalkers}')
             p0 = np.array([prior_transform(params=params, show=False, theta=theta) for 
                            theta in np.random.rand(Nwalkers, Ndim)])
-            with mp.Pool() as pool:
+            if use_pool:
+                print(f'\nRunning with multiprocessing')
+                with mp.Pool() as pool:
+                    sampler = emcee.EnsembleSampler(Nwalkers, Ndim, get_lnpost, 
+                                                    args=args, pool=pool, vectorize=vectorise)
+                    sampler.run_mcmc(p0, Nsamples, progress=True, store=True)
+            else:
+                print(f'\nRunning without multiprocessing')
                 sampler = emcee.EnsembleSampler(Nwalkers, Ndim, get_lnpost, 
-                                                args=args, pool=pool, vectorize=vectorise)
+                                                args=args, pool=None, vectorize=vectorise)
                 sampler.run_mcmc(p0, Nsamples, progress=True, store=True)
-                chains = sampler.get_chain(flat=True, discard=Nburn, thin=Nthin)
-                print(f'\nPlotting the chains for all parameters')
-                if plotchains:
-                    for dim in range(Ndim):
-                        plt.figure(figsize=(10, 3), dpi=100)
-                        plt.plot(chains[Nburn:, dim], color='crimson', alpha=0.3)
-                        plt.xlabel(f'Samples', fontweight='bold', fontsize=10)
-                        plt.ylabel(f'Value', fontweight='bold', fontsize=10)
-                        plt.title(f'{params[dim].label}', fontweight='bold', fontsize=13)
-                        plt.grid(True, alpha=0.5, ls='dashed')
-                        plt.tight_layout()
-                        plt.savefig(f'{chaindir}/{params[dim].name}.chains.pdf', dpi=150)
+                
+            chains = sampler.get_chain(flat=True, discard=Nburn, thin=Nthin)
         
         elif name == 'pocomc':
             Nburn = 0
             priors = prior_transform(params=params, show=True)
             prior = pc.Prior(priors)
-            try:
-                with pc.parallel.MPIPool() as pool:
-                    print(f'\nRunning with MPI-enabled pooling')
-                    sampler = pc.Sampler(prior=prior, likelihood=get_lnlike_optimised, likelihood_args=args[1:],
+            if use_pool:
+                try:
+                    with pc.parallel.MPIPool() as pool:
+                        print(f'\nRunning with MPI-enabled pooling')
+                        sampler = pc.Sampler(prior=prior, likelihood=get_lnlike_optimised, likelihood_args=args[1:],
+                                             n_effective=None, n_active=256, random_state=None, 
+                                             pool=pool, output_dir=chaindir, vectorize=vectorise)
+                        sampler.run(save_every=None, n_total=2048, n_evidence=2048)
+                        
+                except Exception:
+                    print(f'\nRunning without MPI but using {os.cpu_count()} processors')
+                    sampler = pc.Sampler(prior=prior, likelihood=get_lnlike_optimised, likelihood_args=args[1:], 
                                          n_effective=None, n_active=256, random_state=None, 
-                                         pool=pool, output_dir=chaindir, vectorize=vectorise)
+                                         pool=os.cpu_count(), output_dir=chaindir, vectorize=vectorise)
                     sampler.run(save_every=None, n_total=2048, n_evidence=2048)
-                    chains, lnlike, lnpost = sampler.posterior(resample=True)
-            except Exception:
-                print(f'\nRunning without MPI but using {os.cpu_count()} processors')
+            else:
+                print(f'\nRunning without multiprocessing')
                 sampler = pc.Sampler(prior=prior, likelihood=get_lnlike_optimised, likelihood_args=args[1:], 
                                      n_effective=None, n_active=256, random_state=None, 
-                                     pool=os.cpu_count(), output_dir=chaindir, vectorize=vectorise)
+                                     pool=None, output_dir=chaindir, vectorize=vectorise)
                 sampler.run(save_every=None, n_total=2048, n_evidence=2048)
-                chains, lnlike, lnpost = sampler.posterior(resample=True)
 
+            chains, lnlike, lnpost = sampler.posterior(resample=True)
+        
+        if plotchains:
+            print(f'\nPlotting the chains for all parameters')
+            for dim in range(Ndim):
+                plt.figure(figsize=(10, 3), dpi=100)
+                plt.plot(chains[Nburn:, dim], color='crimson', alpha=0.3)
+                plt.xlabel(f'Samples', fontweight='bold', fontsize=10)
+                plt.ylabel(f'Value', fontweight='bold', fontsize=10)
+                plt.title(f'{params[dim].label}', fontweight='bold', fontsize=13)
+                plt.grid(True, alpha=0.5, ls='dashed')
+                plt.tight_layout()
+                plt.savefig(f'{chaindir}/{params[dim].name}.chains.pdf', dpi=150)
+        
         print(f'\nSaving the posterior chains in {chainfile}')
         np.save(chainfile, chains)
 
