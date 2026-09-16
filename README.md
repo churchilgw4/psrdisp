@@ -9,6 +9,8 @@ Currently supported models:
 5. White noise -- up to epoch-wise quadrature variation to uncertainties
 
 ## Usage
+
+### Running without process distribution across workers
 ```
 python3 psrdisp.py --psrname PSR --parfile ./sample/sample.par --dmfile ./sample/sample.dms.txt
                    --paramfile ./sample/sample.pars.txt --timfile ./sample/sample.tim
@@ -16,6 +18,26 @@ python3 psrdisp.py --psrname PSR --parfile ./sample/sample.par --dmfile ./sample
                    --Nsamples 1000 --DMNharm 100 --plotchains --plot_realisations --threshold 5.0
                    --add_dms --n_realisations 20
 ```
+
+### Running with process distribution across workers
+```
+python3 psrdisp.py --psrname PSR --parfile ./sample/sample.par --dmfile ./sample/sample.dms.txt
+                   --paramfile ./sample/sample.pars.txt --timfile ./sample/sample.tim
+                   --truthsfile ./sample/sample.truths.txt --outdir ./sample/ --sampler emcee
+                   --Nsamples 1000 --DMNharm 100 --plotchains --plot_realisations --threshold 5.0
+                   --add_dms --n_realisations 20 --pool
+```
+NOTE: The default setting is to use all the available processors to sample the likelihood for optimal performance
+
+### Running with vectorised likelihood computation
+```
+python3 psrdisp.py --psrname PSR --parfile ./sample/sample.par --dmfile ./sample/sample.dms.txt
+                   --paramfile ./sample/sample.pars.txt --timfile ./sample/sample.tim
+                   --truthsfile ./sample/sample.truths.txt --outdir ./sample/ --sampler emcee
+                   --Nsamples 1000 --DMNharm 100 --plotchains --plot_realisations --threshold 5.0
+                   --add_dms --n_realisations 20 --vectorise
+```
+NOTE: The vectorised implementation gives a significant boost in computation time when using the `pocomc` sampler
 
 ## Citation
 ```
