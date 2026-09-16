@@ -134,7 +134,8 @@ def get_Nmat(theta, dmerrs, dispefacparams, dispequadparams):
     '''
         Function to get the DM white-noise covariance matrix assuming logarithmic quadrature factors.
         Currently it does not support dense jitter-affected correlations
-        InParams: parameter sample vector, DM errors in pc/cm^3, and a list of DispParam paramters
+        InParams: parameter sample vector, DM errors in pc/cm^3, array of DISPEFAC paramters and
+                  array of DISPEQUAD parameters
         Output: the DM White-noise covariance matrix
     '''
     if not np.any(dispefacparams) and not np.any(dispequadparams):
@@ -177,7 +178,7 @@ def broken_powerlaw(f, log10_A, gamma, delta, fb, kappa):
         Function to get the broken-powerlaw spectral density for a given basis
         InParams: array of linear Fourier-frequencies, power-law amplitude, pre-break spectral
                   index (for f<f_b), post-break spectral index (for f>f_b), transition frequency in 1/s
-                  and smoothness of transition.
+                  and smoothness of transition
         Output: the Power Spectral Dnesity of a Fourier-dommain broken-powerlaw process
     '''
     yr = 1*u.year.to(u.s)
@@ -189,7 +190,8 @@ def broken_powerlaw(f, log10_A, gamma, delta, fb, kappa):
 def get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd='powerlaw'):
     '''
         Function to get the Gaussian Process kernel matrix for power-law processes
-        InParams: parameter sample vector, time span in s, and list of DispParam parameters
+        InParams: parameter sample vector, time span in s, array of DM noise parameters, 
+                  array of SW noise parameters, DM noise harmonics, SW noise harmonics and PSD method
         Output: the GP kernel matrix for a PL spectrum with analytically marginalised DM Polynomial
     '''
     if dmnparams.size:
@@ -243,7 +245,8 @@ def get_Umat(t, Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, toas, timing_mode
         Also, the entries for DMGP and SWGP are scaled with fref**2/DMconst to make them coherent
         with the definitions in ENTERPRSIE (taking fref as 1400 MHz for comparison)
         InParams: time in s, time span in s, DM reference epoch in s, SW reference epoch in s, 
-                  list of DispParam parameters, ToAs object (PINT), timing model onject (PINT) 
+                  array of DM noise parameters, array of SW noise parameters, ToAs object (PINT), 
+                  timing model onject (PINT), DM noise harmonics, SW noise harmonics 
                   and chromatic reference frequency in MHz
         Output: the DM basis matrix
     '''
@@ -298,8 +301,8 @@ def get_dm_sw(toas, timing_model, n_earth):
 def get_swdetsignal(t, Tref_sw, toas, timing_model, theta, swdetparams, orders):
     '''
         Function to get a deterministic signal for the solar-wind process
-        InParams: time in s, SW reference epoch in s, ToAs object (PINT), 
-                  timing model object (PINT), parameter sample vector and list of DispParam parameters
+        InParams: time in s, SW reference epoch in s, ToAs object (PINT), timing model object (PINT), 
+                  parameter sample vector, array of deterministic SW parameters and array of their orders
         Output: the DM contribution from deterministic SW process with a polynomial form
     '''
     if not len(swdetparams):
@@ -350,7 +353,9 @@ def get_lnpost(theta, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, fla
         InParams: parameter sample vector, list of DispParam parameters, DMs in pc/cm^3, DM errors in pc/cm^3, 
                   time array in s, time span in s, reference epoch for DM, reference epoch for SW, 
                   ToAs object (PINT), list of DM flags, timing model object (PINT), DMN harmonics, 
-                  SWN harmonics and the chromatic reference frequency in MHz
+                  SWN harmonics, the chromatic reference frequency in MHz, array of DISPEFAC parameters, 
+                  array of DISPEQUAD parameters, array pf DM noise parameters, array of SW noise parameters, 
+                  array of deterministic SW parameters and array of their orders
         Output: the log-posterior value as per the parameter samples
     '''
     lnprior = get_lnprior(theta, params)
@@ -365,7 +370,7 @@ def get_lnpost(theta, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, fla
 def prior_transform(params, show=True, theta=None):
     '''
         Function to get the prior transform for dispersive noise parameters
-        InParams: parameter sample vector and list of DispParam parameters
+        InParams: a list of DispParam parameters, flag to show the results and parameter sample vector
         Output: the transformed prior distributions for the parameters if parameter sample vector
                 is provided, otherwise an array of prior distributions
     '''
@@ -399,7 +404,9 @@ def get_lnlike_optimised(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, f
         InParams: parameter sample vector, list of DispParam parameters, DMs in pc/cm^3, DM errors in pc/cm^3, 
                   time array in s, time span in s, reference epoch for DM, reference epoch for SW, 
                   ToAs object (PINT), list of DM flags, timing model object (PINT), DMN harmonics, 
-                  SWN harmonics and chromatic reference frequency in MHz.
+                  SWN harmonics, the chromatic reference frequency in MHz, array of DISPEFAC parameters, 
+                  array of DISPEQUAD parameters, array pf DM noise parameters, array of SW noise parameters, 
+                  array of deterministic SW parameters and array of their orders
         Output: the log-likelihood value as per the parameters
     '''
     N = get_Nmat(theta, dmerrs, dispefacparams, dispequadparams)
@@ -439,7 +446,10 @@ def get_realisation(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags,
         Function to get a random time-domain realisation of stochastic noise processes
         InParams: parameter sample vector, list of DispParam parameters, DMs in pc/cm^3, DM errors in pc/cm^3, 
                   time array in s, time span in s, reference epoch for DM, reference epoch for SW, ToAs object (PINT), 
-                  list of DM flags, timing model object (PINT), DMN harmonics, and SWN harmonics.
+                  list of DM flags, timing model object (PINT), DMN harmonics, SWN harmonics, 
+                  the chromatic reference frequency in MHz, array of DISPEFAC parameters, 
+                  array of DISPEQUAD parameters, array pf DM noise parameters, array of SW noise parameters, 
+                  array of deterministic SW parameters and array of their orders
         Output: an array of a random time-domain realisation of the stochastic processes
     '''
     N = get_Nmat(theta, dmerrs, dispefacparams, dispequadparams)
@@ -463,8 +473,7 @@ def read_dmfile(dmfile, return_flags=False):
     '''
         Function to extract the MJD, DM and DM errors from a DM time series file
         InParams: path to the DM time series file and option to return flags
-        Output: arrays of MJDs converted to s, DMs in pc/cm^3, DM errors in pc/cm^3 and the
-                DM flags (if required)
+        Output: arrays of MJDs converted to s, DMs in pc/cm^3, DM errors in pc/cm^3 and array of DM flags
     '''
     if os.path.isfile(dmfile):
         
@@ -533,10 +542,13 @@ def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw,
         InParams: number of realisations to be plotted, posterior chains of sampled parameters, 
                   a list of DispParam parameters, DM time series in pc/cm^3, DM errors in pc/cm^3, time in s, 
                   time span in s, DM reference epoch in s, SW reference epoch in s, list of DM flags, 
-                  path to the pulsar ephemeris file, DMN harmonics, SWN harmonics, path to the output directory, 
-                  pulsar name, ToAs object (PINT), timing model object (PINT), flag to save the plot, 
-                  flag to add DM time series to the realisations, flag to add title in the plot and
-                  the threshold for calculating the randomness in generated realisations
+                  path to the pulsar ephemeris file, DMN harmonics, SWN harmonics, the chromatic reference
+                  frequency in MHz, path to the output directory, pulsar name, ToAs object (PINT), 
+                  timing model object (PINT), array of DISPEFAC parameters, array of DISPEQUAD parameters, 
+                  array pf DM noise parameters, array of SW noise parameters, array of deterministic SW parameters, 
+                  array of their orders, threshold for calculating the randomness in generated realisations, 
+                  flag to add DM time series to the realisations, number of realisations to be generated, 
+                  flag to save the plot and flag to add title in the plot
         Output: None
     '''
     param_choices = np.zeros((n_realisations, len(params)))
@@ -617,7 +629,12 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psr
                   DMN harmonics, SWN harmonics, path to the directory to store chains and other results, 
                   name of the pulsar, time array in s, DMs in pc/cm^3, DM errors in pc/cm^3, time span in s,
                   reference epoch for DM, reference epoch for SW, ToAs object (PINT), list of DM flags,
-                  timing model object (PINT), flag to plot chains, and path to the file with parameter truths.
+                  timing model object (PINT), the reference chromatic frequency in MHz, flag to plot chains, 
+                  path to the file with parameter truths, array of DISPEFAC parameters, array of DISPEQUAD parameters, 
+                  array pf DM noise parameters, array of SW noise parameters, array of deterministic SW parameters, 
+                  array of their orders, flag to plot the generated realisations of the extracted processes, 
+                  threshold for calculating the randomness in generated realisations, 
+                  flag to add DM time series to the realisations and number of realisations to be generated
         Output: None
     '''
     Ndim = len(params)
