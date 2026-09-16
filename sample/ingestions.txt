@@ -1,4 +1,0 @@
-# The order should be in sorted fashion as the parameter list
-DMEFAC 1.0
-gamma_gp_dm 2.5
-log10_A_gp_dm -14.0
