@@ -10,7 +10,6 @@ Currently supported models:
 
 ## Usage
 
-### Running without process distribution across workers
 ```
 python3 psrdisp.py --psrname PSR --parfile ./sample/sample.par --dmfile ./sample/sample.dms.txt
                    --paramfile ./sample/sample.pars.txt --timfile ./sample/sample.tim
@@ -19,25 +18,12 @@ python3 psrdisp.py --psrname PSR --parfile ./sample/sample.par --dmfile ./sample
                    --add_dms --n_realisations 20
 ```
 
-### Running with process distribution across workers
-```
-python3 psrdisp.py --psrname PSR --parfile ./sample/sample.par --dmfile ./sample/sample.dms.txt
-                   --paramfile ./sample/sample.pars.txt --timfile ./sample/sample.tim
-                   --truthsfile ./sample/sample.truths.txt --outdir ./sample/ --sampler emcee
-                   --Nsamples 1000 --DMNharm 100 --plotchains --plot_realisations --threshold 5.0
-                   --add_dms --n_realisations 20 --pool
-```
-NOTE: The default setting is to use all the available processors to sample the likelihood for optimal performance
+In order to distribute the sampling load across multiple processors in parallel, use the `--pool` option. 
+The default setting is to use all the available processors to sample the likelihood for optimal performance.
+With the `pocomc` sampler, if the process is being executed on an MPI-enabled cluster, it will utilise the full parallelisation possible based on the given configuration in the job submission script.
 
-### Running with vectorised likelihood computation
-```
-python3 psrdisp.py --psrname PSR --parfile ./sample/sample.par --dmfile ./sample/sample.dms.txt
-                   --paramfile ./sample/sample.pars.txt --timfile ./sample/sample.tim
-                   --truthsfile ./sample/sample.truths.txt --outdir ./sample/ --sampler emcee
-                   --Nsamples 1000 --DMNharm 100 --plotchains --plot_realisations --threshold 5.0
-                   --add_dms --n_realisations 20 --vectorise
-```
-NOTE: The vectorised implementation gives a significant boost in computation time when using the `pocomc` sampler
+In order to run the vectorised implementation of likelihood, use the `--vectorise` option. 
+This gives a significant boost in computation time when using the `pocomc` sampler.
 
 ## Citation
 ```
