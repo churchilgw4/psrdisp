@@ -1,9 +1,6 @@
 import numpy as np
 import astropy.units as u
 import argparse
-import multiprocessing as mp
-import emcee
-import corner
 import time
 import sys
 
@@ -11,6 +8,7 @@ from disputils import *
 from pint.models.model_builder import get_model
 from pint.simulation import make_fake_toas_fromtim, make_fake_toas_fromMJDs
 from pint.logging import setup
+
 _ = setup(level='ERROR')
 
 if __name__ == '__main__':
