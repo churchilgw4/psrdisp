@@ -1,6 +1,22 @@
 # PSRDISP: A novel dispersive noise modeling framework
 A single-pulsar noise analysis package to model dispersive processes using high-precision epoch-wise Dispersion Measure time series.
 
+Currently supported models:
+1. DM Taylor series (up to second order)
+2. SW Taylor series
+3. DM noise -- GP implementation with powerlaw kernel
+4. SW noise -- GP implementation with powerlaw kernel
+5. White noise -- up to epoch-wise quadrature variation to uncertainties
+
+## Usage
+```
+python3 psrdisp.py --psrname PSR --parfile ./sample/sample.par --dmfile ./sample/sample.dms.txt
+                   --paramfile ./sample/sample.pars.txt --timfile ./sample/sample.tim
+                   --truthsfile ./sample/sample.truths.txt --outdir ./sample/ --sampler emcee
+                   --Nsamples 1000 --DMNharm 100 --plotchains --plot_realisations --threshold 5.0
+                   --add_dms --n_realisations 20
+```
+
 ## Requirements
 ```
 NUMPY
