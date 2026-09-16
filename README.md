@@ -21,7 +21,7 @@ python3 psrdisp.py --psrname PSR --parfile ./sample/sample.par --dmfile ./sample
 ```
 NUMPY
 ASTROPY
-PINT
+PINT-PULSAR
 MATPLOTLIB
 SCIPY
 EMCEE
