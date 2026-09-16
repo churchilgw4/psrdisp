@@ -75,6 +75,12 @@ if __name__ == '__main__':
     parser.add_argument(f'--n_realisations', type=int, default=20, 
                         help=f'Number of realisations to be generated for the estimated parameters')
 
+    parser.add_argument(f'--vectorise', action=f'store_true', default=False, 
+                        help=f'Whether to vectorise the likelihood computations')
+
+    parser.add_argument(f'--pool', action=f'store_true', default=False, 
+                        help=f'Whether to use multiprocessing for computations')
+
     args = parser.parse_args()
 
     if args.outdir:
@@ -149,7 +155,12 @@ if __name__ == '__main__':
     swdetparams = [param for param in params if param.is_deterministic and 'NE_SW' in param.name]
     orders = np.array([int(param.name.split('NE_SW')[-1]) if param.name.split('NE_SW')[-1] else 0 
               for param in swdetparams])
-    
+
+    if args.vectorise and args.pool:
+        print(f'\nCannot use multiprocessing along with vectorisation to perform computations')
+        print(f'\nThe process will terminate')
+        sys.exit()
+
     sample_noise(name=args.sampler, params=params, Nsamples=args.Nsamples, DMNharm=args.DMNharm, 
                  SWNharm=args.SWNharm, outdir=outdir, chaindir=chaindir, psrname=args.psrname, t=t, dms=dms, 
                  dmerrs=dmerrs, Tspan=Tspan, Tref_dm=Tref_dm, Tref_sw=Tref_sw, toas=psrtoas, 
@@ -158,7 +169,8 @@ if __name__ == '__main__':
                  dispefacparams=dispefacparams, dispequadparams=dispequadparams, 
                  dmnparams=dmnparams, swnparams=swnparams, swdetparams=swdetparams, orders=orders, 
                  plot_generated_realisations=args.plot_realisations, threshold=args.threshold, 
-                 add_dms=args.add_dms, n_realisations=args.n_realisations)
+                 add_dms=args.add_dms, n_realisations=args.n_realisations, 
+                 vectorise=args.vectorise, use_pool=args.pool)
     
     process_finish = time.time()
     print(f'\nThe process took {(process_finish-process_start)/60:.2f} minutes to finish')

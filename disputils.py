@@ -12,6 +12,7 @@ import pocomc as pc
 from scipy import stats
 import json
 from math import factorial
+_cache = {}
 
 class DispParam:
     '''
@@ -116,359 +117,6 @@ def get_DispParams(paramfile, flags):
         print(f'\nThe process will terminate')
         sys.exit()
 
-def get_freqs(Tspan, Nharm=None):
-    '''
-        Function to get the Fourier-domain frequencies
-        InParams: time span in s and possibly number of harmonics
-        Output: array of uniformly-spaced linear Fourier-frequencies
-    '''
-    if not Nharm:
-        print(f'\nSince no harmonics are provided, setting Nharm as per 1/month')
-        Tspan_years = Tspan*u.s.to(u.year)
-        Nharm = int(np.floor(Tspan_years*12))
-    
-    f = np.linspace(1/Tspan, Nharm/Tspan, Nharm)
-    return f
-
-def get_Nmat(theta, dmerrs, dispefacparams, dispequadparams):
-    '''
-        Function to get the DM white-noise covariance matrix assuming logarithmic quadrature factors.
-        Currently it does not support dense jitter-affected correlations
-        InParams: parameter sample vector, DM errors in pc/cm^3, array of DISPEFAC paramters and
-                  array of DISPEQUAD parameters
-        Output: the DM White-noise covariance matrix
-    '''
-    if not np.any(dispefacparams) and not np.any(dispequadparams):
-        raise ValueError(f'No white noise parameters present in the noise model')
-    else:
-        dispefacs = np.ones(dmerrs.size)
-        dispequads = -np.inf*np.ones(dmerrs.size)
-        if np.any(dispefacparams):
-            dispefacs = np.concatenate([theta[param.idx]*np.ones(dmerrs.size)*param.mask 
-                                         for param in dispefacparams])
-        if np.any(dispequadparams):
-            dispequads = np.concatenate([theta[param.idx]*np.ones(dmerrs.size)*param.mask 
-                             for param in dispequadparams])
-
-        Nmat = np.array(dispefacs**2 * (dmerrs**2 + 10**(2*dispequads)))
-        return Nmat
-
-def powerlaw(f, Tspan, log10_A, gamma):
-    '''
-        Function to get the Fourier-domain power-law for a given basis
-        InParams: array of linear Fourier-frequencies, Time span in seconds, 
-                  power-law amplitude and spectral index
-        Output: the Power Spectral Density of a Fourier-domain free-spectral process
-    '''
-    yr = 1*u.year.to(u.s)
-    fyr = 1/yr
-    pl = ((10**log10_A)**2/(12*np.pi**2*Tspan))*f**(-gamma)*fyr**(gamma-3)
-    return pl
-
-def free_spectrum(log10_rho):
-    '''
-        Function to get the free-spectrum density for a given basis
-        InParams: time span in s and free spectrum components
-        Output: the Power Spectral Density of a free-spectrum process
-    '''
-    return 10**(2*log10_rho)
-
-def broken_powerlaw(f, log10_A, gamma, delta, fb, kappa):
-    '''
-        Function to get the broken-powerlaw spectral density for a given basis
-        InParams: array of linear Fourier-frequencies, power-law amplitude, pre-break spectral
-                  index (for f<f_b), post-break spectral index (for f>f_b), transition frequency in 1/s
-                  and smoothness of transition
-        Output: the Power Spectral Dnesity of a Fourier-dommain broken-powerlaw process
-    '''
-    yr = 1*u.year.to(u.s)
-    fyr = 1/yr
-    hcf = 10**(log10_A)*((f/fyr)**((3-gamma)/2))*(1+(f/fb)**(1/kappa))**(kappa*(gamma-delta)/2)
-    pl = hcf**2/(12*np.pi**2*f**3)
-    return pl
-
-def get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd='powerlaw'):
-    '''
-        Function to get the Gaussian Process kernel matrix for power-law processes
-        InParams: parameter sample vector, time span in s, array of DM noise parameters, 
-                  array of SW noise parameters, DM noise harmonics, SW noise harmonics and PSD method
-        Output: the GP kernel matrix for a PL spectrum with analytically marginalised DM Polynomial
-    '''
-    if dmnparams.size:
-        f_dmn = get_freqs(Tspan, DMNharm)
-        if psd == 'powerlaw':
-            try: log10_A_dmn = [par for par in dmnparams if par.name == 'TNDMAMP'][0]
-            except Exception as e:
-                raise ValueError(f'Cannot extract DMN amplitude from parameter file')
-            try: gamma_dmn = [par for par in dmnparams if par.name == 'TNDMGAM'][0]
-            except Exception as e:
-                raise ValueError(f'Cannot extract DMN spectral index from parameter file')
-    else:
-        f_dmn = np.zeros(0)
-
-    if swnparams.size:
-        f_swn = get_freqs(Tspan, SWNharm)
-        if psd == 'powerlaw':
-            try: log10_A_swn = [par for par in swnparams if par.name == 'TNSWAMP'][0]
-            except Exception as e:
-                raise ValueError(f'Cannot extract SWN amplitude from parameter file')
-            try: gamma_swn = [par for par in swnparams if par.name == 'TNSWGAM'][0]
-            except Exception as e:
-                raise ValueError(f'Cannot extract SWN spectral index from parameter file')
-    else:
-        f_swn = np.zeros(0)
-
-    Phi = []
-    Phi.extend([1e+40, 1e+40, 1e+40])
-
-    if f_dmn.size:
-        dmn = np.zeros(2*f_dmn.size)
-        for i in range(f_dmn.size):
-            
-            dmn[2*i] = dmn[2*i+1] = powerlaw(f_dmn[i], Tspan, log10_A=theta[log10_A_dmn.idx], 
-                                             gamma=theta[gamma_dmn.idx])
-        Phi.extend(dmn)
-
-    if f_swn.size:
-        swn = np.zeros(2*f_swn.size)
-        for i in range(f_swn.size):
-            swn[2*i] = swn[2*i+1] = powerlaw(f_swn[i], Tspan, log10_A=theta[log10_A_swn.idx], 
-                                             gamma=theta[gamma_swn.idx])
-        Phi.extend(swn)
-
-    return np.array(Phi)
-
-def get_Umat(t, Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, toas, timing_model, DMNharm, SWNharm, fref):
-    '''
-        Function to get the basis matrix for Fourier domain red noise process
-        This implementation considers SWEPOCH to be the same as the DMEPOCH
-        Also, the entries for DMGP and SWGP are scaled with fref**2/DMconst to make them coherent
-        with the definitions in ENTERPRSIE (taking fref as 1400 MHz for comparison)
-        InParams: time in s, time span in s, DM reference epoch in s, SW reference epoch in s, 
-                  array of DM noise parameters, array of SW noise parameters, ToAs object (PINT), 
-                  timing model onject (PINT), DM noise harmonics, SW noise harmonics 
-                  and chromatic reference frequency in MHz
-        Output: the DM basis matrix
-    '''
-    if dmnparams.size:
-        f_dmn = get_freqs(Tspan, DMNharm)
-        convfactor = fref**2/DMconst
-    else:
-        f_dmn = np.zeros(0)
-
-    if swnparams.size:
-        f_swn = get_freqs(Tspan, SWNharm)
-        dm_sw = get_dm_sw(toas, timing_model, n_earth=1.0)
-    else:
-        f_swn = np.zeros(0)
-
-    U = [[0 for val in range(3)] for i in range(t.size)]
-    for i in range(t.size):
-        U[i][0] = 1.0
-        U[i][1] = (t[i]-Tref_dm)*u.s.to(u.year)
-        U[i][2] = 0.5*((t[i]-Tref_dm)*u.s.to(u.year))**2
-        if f_dmn.size:
-            dmn = np.zeros(2*f_dmn.size)
-            for j in range(f_dmn.size):
-                uval = 2*np.pi*(j+1)*(t[i]-Tref_dm)/Tspan
-                dmn[2*j] = np.sin(uval)*convfactor.value
-                dmn[2*j+1] = np.cos(uval)*convfactor.value
-            U[i].extend(dmn)
-        if f_swn.size:
-            swn = np.zeros(2*f_swn.size)
-            for j in range(f_swn.size):
-                uval = 2*np.pi*(j+1)*(t[i]-Tref_sw)/Tspan
-                swn[2*j] = np.sin(uval)*dm_sw[i]
-                swn[2*j+1] = np.cos(uval)*dm_sw[i]
-            U[i].extend(swn)
-    
-    return np.array(U)
-
-def get_dm_sw(toas, timing_model, n_earth):
-    '''
-        Function to return the DM contribution from solar wind
-        InParams: ToAs object (PINT), timing model object (PINT) and solar-wind electron density in 1/cm^3
-        Output: the DM induced by the solar-wind electron density
-    '''
-    if 'SolarWindDispersion' in timing_model.components:
-        geometric_factor = timing_model.components['SolarWindDispersion'].solar_wind_geometry(toas).value
-        dm_sw = n_earth*geometric_factor
-    else:
-        raise KeyError(f'The SolarWindDispersion component is absent in the timing model')
-    
-    return dm_sw
-
-def get_swdetsignal(t, Tref_sw, toas, timing_model, theta, swdetparams, orders):
-    '''
-        Function to get a deterministic signal for the solar-wind process
-        InParams: time in s, SW reference epoch in s, ToAs object (PINT), timing model object (PINT), 
-                  parameter sample vector, array of deterministic SW parameters and array of their orders
-        Output: the DM contribution from deterministic SW process with a polynomial form
-    '''
-    if not len(swdetparams):
-        signal = np.zeros(t.size)
-    else:
-        # Since the prior_transform is being used, the indexing in theta is set accordingly
-        signal = 0
-        for param, order in zip(swdetparams, orders):
-            signal += get_dm_sw(toas, timing_model, theta[param.idx])*((t-Tref_sw)*u.s.to(u.year))**order/factorial(order)
-
-    try: fid_dm = timing_model.DM.value
-    except AttributeError:
-        print(f'\nNo fiducial DM present in the timing model')
-        print(f'\nUsing DM = 0 as reference')
-        fid_dm = 0.0
-        
-    signal += fid_dm
-    return signal
-
-def UniformPrior(value, pmin, pmax):
-    '''
-        Function to give uniform prior distribution
-        InParams: parameter sample value, parameter minimum value and parameter maximum value
-        Output: the Uniform prior value for a given parameter sample
-    '''
-    prior = ((value >= pmin) & (value <= pmax)) / (pmax - pmin)
-    
-    return prior
-
-def get_lnprior(theta, params):
-    '''
-        Function to get the log-prior for different parameters
-        InParams: parameter sample vector and list of DispParam parameters
-        Output: the log-prior value as per the parameter samples
-    '''
-    mins = np.array([float(param.min) for param in params])
-    maxs = np.array([float(param.max) for param in params])
-    
-    lnprior = np.sum([np.log(UniformPrior(value, pmin, pmax)) for value, pmin, pmax in zip(theta, mins, maxs)])
-
-    return lnprior
-
-def get_lnpost(theta, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, 
-               timing_model, DMNharm, SWNharm, fref, dispefacparams, dispequadparams, 
-               dmnparams, swnparams, swdetparams, orders):
-    '''
-        Function to get the log-posterior for different paramters
-        InParams: parameter sample vector, list of DispParam parameters, DMs in pc/cm^3, DM errors in pc/cm^3, 
-                  time array in s, time span in s, reference epoch for DM, reference epoch for SW, 
-                  ToAs object (PINT), list of DM flags, timing model object (PINT), DMN harmonics, 
-                  SWN harmonics, the chromatic reference frequency in MHz, array of DISPEFAC parameters, 
-                  array of DISPEQUAD parameters, array pf DM noise parameters, array of SW noise parameters, 
-                  array of deterministic SW parameters and array of their orders
-        Output: the log-posterior value as per the parameter samples
-    '''
-    lnprior = get_lnprior(theta, params)
-    
-    if not np.isfinite(lnprior):
-        return lnprior
-    else:
-        return lnprior + get_lnlike_optimised(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, 
-                                              timing_model, DMNharm, SWNharm, fref, dispefacparams, dispequadparams, 
-                                              dmnparams, swnparams, swdetparams, orders)
-
-def prior_transform(params, show=True, theta=None):
-    '''
-        Function to get the prior transform for dispersive noise parameters
-        InParams: a list of DispParam parameters, flag to show the results and parameter sample vector
-        Output: the transformed prior distributions for the parameters if parameter sample vector
-                is provided, otherwise an array of prior distributions
-    '''
-    if isinstance(params, list):
-        for param in params:
-            if not isinstance(param, DispParam):
-                raise TypeError(f'Invalid parameter type for {param.name}')
-    else:
-        raise TypeError(f'A list of DispParam parameters should be provided')
-    
-    mins = np.array([float(param.min) for param in params])
-    maxs = np.array([float(param.max) for param in params])
-    spans = maxs - mins
-    if not np.any(theta):
-        priors = np.array([stats.uniform(loc=low, scale=span) for low, span in zip(mins, spans)])
-        if show:
-            print(f'\nPrior Distributions:')
-            for pname, dist in zip([param.name for param in params], priors):
-                a, b = dist.support()
-                print(f'\n\t{pname}: U({a:.3g}, {b:.3g})')
-    else:
-        priors = spans * theta + mins
-    
-    return priors
-
-def get_lnlike_optimised(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, 
-                         timing_model, DMNharm, SWNharm, fref, dispefacparams, dispequadparams, 
-                         dmnparams, swnparams, swdetparams, orders):
-    '''
-        Function to get the log-likelihood in an optimised form for all the sampled parameters
-        InParams: parameter sample vector, list of DispParam parameters, DMs in pc/cm^3, DM errors in pc/cm^3, 
-                  time array in s, time span in s, reference epoch for DM, reference epoch for SW, 
-                  ToAs object (PINT), list of DM flags, timing model object (PINT), DMN harmonics, 
-                  SWN harmonics, the chromatic reference frequency in MHz, array of DISPEFAC parameters, 
-                  array of DISPEQUAD parameters, array pf DM noise parameters, array of SW noise parameters, 
-                  array of deterministic SW parameters and array of their orders
-        Output: the log-likelihood value as per the parameters
-    '''
-    N = get_Nmat(theta, dmerrs, dispefacparams, dispequadparams)
-    Phi = get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm)
-    U = get_Umat(t, Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, toas, timing_model, DMNharm, SWNharm, fref)
-    swdet = get_swdetsignal(t, Tref_sw, toas, timing_model, theta, swdetparams, orders)
-    y = dms - swdet
-    
-    Ninv_y = y / N
-    y_Ninv_y = y @ Ninv_y
-    Ninv_U = U / N[:, None]
-    UT_Ninv_y = Ninv_U.T @ y
-    UT_Ninv_U = U.T @ Ninv_U
-    Sigmainv = np.diag(1/Phi) + UT_Ninv_U
-    
-    try:
-        # SVD can also be done to implement this (as done in la_forge)
-        Sigmainv_cf = sl.cho_factor(Sigmainv)
-        Sigmainv_UT_Ninv_y = sl.cho_solve(Sigmainv_cf, UT_Ninv_y)
-        y_Ninv_U_Sigma_UT_Ninv_y = UT_Ninv_y @ Sigmainv_UT_Ninv_y
-        y_Cinv_y = y_Ninv_y - y_Ninv_U_Sigma_UT_Ninv_y
-        logdet_N = np.sum(np.log(N))
-        logdet_Sigmainv = 2*np.sum(np.log(np.diag(Sigmainv_cf[0])))
-        logdet_Phi = np.sum(np.log(Phi))
-        logdet_C = logdet_N + logdet_Sigmainv + logdet_Phi
-        lnlike = -0.5*(y_Cinv_y + logdet_C)
-    
-    except Exception:
-        lnlike = -np.inf
-
-    return lnlike
-
-def get_realisation(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, 
-                    timing_model, DMNharm, SWNharm, fref, dispefacparams, dispequadparams, 
-                    dmnparams, swnparams, swdetparams, orders):
-    '''
-        Function to get a random time-domain realisation of stochastic noise processes
-        InParams: parameter sample vector, list of DispParam parameters, DMs in pc/cm^3, DM errors in pc/cm^3, 
-                  time array in s, time span in s, reference epoch for DM, reference epoch for SW, ToAs object (PINT), 
-                  list of DM flags, timing model object (PINT), DMN harmonics, SWN harmonics, 
-                  the chromatic reference frequency in MHz, array of DISPEFAC parameters, 
-                  array of DISPEQUAD parameters, array pf DM noise parameters, array of SW noise parameters, 
-                  array of deterministic SW parameters and array of their orders
-        Output: an array of a random time-domain realisation of the stochastic processes
-    '''
-    N = get_Nmat(theta, dmerrs, dispefacparams, dispequadparams)
-    Phi = get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm)
-    U = get_Umat(t, Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, toas, timing_model, DMNharm, SWNharm, fref)
-    swdet = get_swdetsignal(t, Tref_sw, toas, timing_model, theta, swdetparams, orders)
-    y = dms - swdet
-
-    Ninv_U = U / N[:, None]
-    UT_Ninv_y = y @ Ninv_U
-    Sigmainv = np.diag(Phi) + U.T @ Ninv_U
-    Sigmainv_cf = sl.cholesky(Sigmainv, lower=False)
-    a_hat = sl.cho_solve((Sigmainv_cf, False), UT_Ninv_y)
-    z = np.random.randn(len(a_hat))
-    a = a_hat + sl.solve_triangular(Sigmainv_cf, z, lower=False)
-    realisation = U @ a
-    
-    return realisation
-
 def read_dmfile(dmfile, return_flags=False):
     '''
         Function to extract the MJD, DM and DM errors from a DM time series file
@@ -533,10 +181,441 @@ def plot_dmseries(t, dms, dmerrs, outdir, psrname):
     plt.tight_layout()
     plt.savefig(f'{outdir}/{psrname}.DM.time.series.pdf', dpi=200)
 
+def get_freqs(Tspan, Nharm=None):
+    '''
+        Function to get the Fourier-domain frequencies
+        InParams: time span in s and possibly number of harmonics
+        Output: array of uniformly-spaced linear Fourier-frequencies
+    '''
+    if not Nharm:
+        print(f'\nSince no harmonics are provided, setting Nharm as per 1/month')
+        Tspan_years = Tspan*u.s.to(u.year)
+        Nharm = int(np.floor(Tspan_years*12))
+    
+    f = np.linspace(1/Tspan, Nharm/Tspan, Nharm)
+    return f
+
+def powerlaw(f, Tspan, log10_A, gamma):
+    '''
+        Function to get the Fourier-domain power-law for a given basis
+        InParams: array of linear Fourier-frequencies, Time span in seconds, 
+                  power-law amplitude and spectral index
+        Output: the Power Spectral Density of a Fourier-domain free-spectral process
+    '''
+    yr = 1*u.year.to(u.s)
+    fyr = 1/yr
+    pl = ((10**log10_A)**2/(12*np.pi**2*Tspan))*f**(-gamma)*fyr**(gamma-3)
+    return pl
+
+def free_spectrum(log10_rho):
+    '''
+        Function to get the free-spectrum density for a given basis
+        InParams: time span in s and free spectrum components
+        Output: the Power Spectral Density of a free-spectrum process
+    '''
+    return 10**(2*log10_rho)
+
+def broken_powerlaw(f, log10_A, gamma, delta, fb, kappa):
+    '''
+        Function to get the broken-powerlaw spectral density for a given basis
+        InParams: array of linear Fourier-frequencies, power-law amplitude, pre-break spectral
+                  index (for f<f_b), post-break spectral index (for f>f_b), transition frequency in 1/s
+                  and smoothness of transition
+        Output: the Power Spectral Dnesity of a Fourier-dommain broken-powerlaw process
+    '''
+    yr = 1*u.year.to(u.s)
+    fyr = 1/yr
+    hcf = 10**(log10_A)*((f/fyr)**((3-gamma)/2))*(1+(f/fb)**(1/kappa))**(kappa*(gamma-delta)/2)
+    pl = hcf**2/(12*np.pi**2*f**3)
+    return pl
+
+def get_Umat(t, Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, toas, timing_model, DMNharm, SWNharm, fref):
+    '''
+        Function to get the basis matrix for Fourier domain red noise process
+        This implementation considers SWEPOCH to be the same as the DMEPOCH
+        Also, the entries for DMGP and SWGP are scaled with fref**2/DMconst to make them coherent
+        with the definitions in ENTERPRSIE (taking fref as 1400 MHz for comparison)
+        InParams: time in s, time span in s, DM reference epoch in s, SW reference epoch in s, 
+                  array of DM noise parameters, array of SW noise parameters, ToAs object (PINT), 
+                  timing model onject (PINT), DM noise harmonics, SW noise harmonics 
+                  and chromatic reference frequency in MHz
+        Output: the DM basis matrix
+    '''
+    if dmnparams.size:
+        f_dmn = get_freqs(Tspan, DMNharm)
+        convfactor = fref**2/DMconst
+    else:
+        f_dmn = np.zeros(0)
+
+    if swnparams.size:
+        f_swn = get_freqs(Tspan, SWNharm)
+        dm_sw = get_dm_sw(toas, timing_model, n_earth=1.0)
+    else:
+        f_swn = np.zeros(0)
+
+    U = [[0 for val in range(3)] for i in range(t.size)]
+    for i in range(t.size):
+        U[i][0] = 1.0
+        U[i][1] = (t[i]-Tref_dm)*u.s.to(u.year)
+        U[i][2] = 0.5*((t[i]-Tref_dm)*u.s.to(u.year))**2
+        if f_dmn.size:
+            dmn = np.zeros(2*f_dmn.size)
+            for j in range(f_dmn.size):
+                uval = 2*np.pi*(j+1)*(t[i]-Tref_dm)/Tspan
+                dmn[2*j] = np.sin(uval)*convfactor.value
+                dmn[2*j+1] = np.cos(uval)*convfactor.value
+            U[i].extend(dmn)
+        if f_swn.size:
+            swn = np.zeros(2*f_swn.size)
+            for j in range(f_swn.size):
+                uval = 2*np.pi*(j+1)*(t[i]-Tref_sw)/Tspan
+                swn[2*j] = np.sin(uval)*dm_sw[i]
+                swn[2*j+1] = np.cos(uval)*dm_sw[i]
+            U[i].extend(swn)
+    
+    return np.array(U)
+
+def get_Nmat(theta, dmerrs, dispefacparams, dispequadparams, vectorise=False):
+    '''
+        Function to get the DM white-noise covariance matrix assuming logarithmic quadrature factors.
+        Currently it does not support dense jitter-affected correlations
+        InParams: parameter sample vector, DM errors in pc/cm^3, array of DISPEFAC paramters, 
+                  array of DISPEQUAD parameters and flag to vectorise the likelihood computations
+        Output: the DM White-noise covariance matrix
+    '''
+    if not np.any(dispefacparams) and not np.any(dispequadparams):
+        raise ValueError(f'No white noise parameters present in the noise model')
+    else:
+        if not vectorise:
+            dispefacs = np.ones(dmerrs.size)
+            dispequads = -np.inf*np.ones(dmerrs.size)
+            if np.any(dispefacparams):
+                for param in dispefacparams:
+                    dispefacs = np.where(param.mask, theta[param.idx], dispefacs)
+            if np.any(dispequadparams):
+                for param in dispequadparams:
+                    dispequads = np.where(param.mask, theta[param.idx], dispequads)
+            Nmat = np.array(dispefacs**2 * (dmerrs**2 + 10**(2*dispequads)))
+        else:
+            dispefacs = np.ones((theta.shape[0], dmerrs.size))
+            dispequads = -np.inf*np.ones((theta.shape[0], dmerrs.size))
+            if np.any(dispefacparams):
+                for param in dispefacparams:
+                    dispefacs = np.where(param.mask[None, :], theta[:, param.idx, None], dispefacs)
+            if np.any(dispequadparams):
+                for param in dispequadparams:
+                    dispequads = np.where(param.mask[None, :], theta[:, param.idx, None], dispequads)
+            Nmat = np.array(dispefacs**2 * (dmerrs[None, :]**2 + 10**(2*dispequads)))
+        return Nmat
+
+def get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd='powerlaw', vectorise=False):
+    '''
+        Function to get the Gaussian Process kernel matrix for power-law processes
+        InParams: parameter sample vector, time span in s, array of DM noise parameters, 
+                  array of SW noise parameters, DM noise harmonics, SW noise harmonics, PSD method 
+                  and flag to vectorise the likelihood computations
+        Output: the GP kernel matrix for a PL spectrum with analytically marginalised DM Polynomial
+    '''
+    if dmnparams.size:
+        f_dmn = get_freqs(Tspan, DMNharm)
+        if psd == 'powerlaw':
+            try: log10_A_dmn = [par for par in dmnparams if par.name == 'TNDMAMP'][0]
+            except Exception as e:
+                raise ValueError(f'Cannot extract DMN amplitude from parameter file')
+            try: gamma_dmn = [par for par in dmnparams if par.name == 'TNDMGAM'][0]
+            except Exception as e:
+                raise ValueError(f'Cannot extract DMN spectral index from parameter file')
+    else:
+        f_dmn = np.zeros(0)
+
+    if swnparams.size:
+        f_swn = get_freqs(Tspan, SWNharm)
+        if psd == 'powerlaw':
+            try: log10_A_swn = [par for par in swnparams if par.name == 'TNSWAMP'][0]
+            except Exception as e:
+                raise ValueError(f'Cannot extract SWN amplitude from parameter file')
+            try: gamma_swn = [par for par in swnparams if par.name == 'TNSWGAM'][0]
+            except Exception as e:
+                raise ValueError(f'Cannot extract SWN spectral index from parameter file')
+    else:
+        f_swn = np.zeros(0)
+
+    if not vectorise:
+        Phi = []
+        Phi.extend([1e+40, 1e+40, 1e+40])
+        if f_dmn.size:
+            dmn = np.zeros(2*f_dmn.size)
+            for i in range(f_dmn.size):
+                dmn[2*i] = dmn[2*i+1] = powerlaw(f_dmn[i], Tspan, log10_A=theta[log10_A_dmn.idx], 
+                                                 gamma=theta[gamma_dmn.idx])
+            Phi.extend(dmn)
+        if f_swn.size:
+            swn = np.zeros(2*f_swn.size)
+            for i in range(f_swn.size):
+                swn[2*i] = swn[2*i+1] = powerlaw(f_swn[i], Tspan, log10_A=theta[log10_A_swn.idx], 
+                                                 gamma=theta[gamma_swn.idx])
+            Phi.extend(swn)
+    else:
+        Phi = [[] for walker in range(theta.shape[0])]
+        for walker in range(theta.shape[0]):
+            Phi[walker].extend([1e+40, 1e+40, 1e+40])
+            if f_dmn.size:
+                dmn = np.zeros(2*f_dmn.size)
+                for i in range(f_dmn.size):
+                    dmn[2*i] = dmn[2*i+1] = powerlaw(f_dmn[i], Tspan, log10_A=theta[walker, log10_A_dmn.idx], 
+                                                     gamma=theta[walker, gamma_dmn.idx])
+                Phi[walker].extend(dmn)
+            if f_swn.size:
+                swn = np.zeros(2*f_swn.size)
+                for i in range(f_swn.size):
+                    swn[2*i] = swn[2*i+1] = powerlaw(f_swn[i], Tspan, log10_A=theta[walker, log10_A_swn.idx], 
+                                                     gamma=theta[walker, gamma_swn.idx])
+                Phi[walker].extend(swn)
+    
+    return np.array(Phi)
+
+def get_dm_sw(toas, timing_model, n_earth, vectorise=False):
+    '''
+        Function to return the DM contribution from solar wind
+        InParams: ToAs object (PINT), timing model object (PINT), solar-wind electron density in 1/cm^3
+                  and flag to vectorise the likelihood computations
+        Output: the DM induced by the solar-wind electron density
+    '''
+    if 'SolarWindDispersion' in timing_model.components:
+        geometric_factor = timing_model.components['SolarWindDispersion'].solar_wind_geometry(toas).value
+        if not vectorise:
+            dm_sw = n_earth*geometric_factor
+        else:
+            dm_sw = n_earth[:, None]*geometric_factor
+    else:
+        raise KeyError(f'The SolarWindDispersion component is absent in the timing model')
+    
+    return dm_sw
+
+def get_swdetsignal(t, Tref_sw, toas, timing_model, theta, swdetparams, orders, vectorise=False):
+    '''
+        Function to get a deterministic signal for the solar-wind process
+        InParams: time in s, SW reference epoch in s, ToAs object (PINT), timing model object (PINT), 
+                  parameter sample vector, array of deterministic SW parameters, array of their orders
+                  and flag to vectorise the likelihood computations
+        Output: the DM contribution from deterministic SW process with a polynomial form
+    '''
+    if not len(swdetparams):
+        if not vectorise:
+            signal = np.zeros(t.size)
+        else:
+            signal = np.zeros((theta.shape[0], t.size))
+    else:
+        if not vectorise:
+            signal = np.zeros(t.size)
+            for param, order in zip(swdetparams, orders):
+                signal += get_dm_sw(toas, timing_model, 
+                                    theta[param.idx], 
+                                    vectorise)*((t-Tref_sw)*u.s.to(u.year))**order/factorial(order)
+        else:
+            signal = np.zeros((theta.shape[0], t.size))
+            for param, order in zip(swdetparams, orders):
+                signal += get_dm_sw(toas, timing_model, 
+                                    theta[:, param.idx], 
+                                    vectorise)*((t-Tref_sw)*u.s.to(u.year))**order/factorial(order)
+
+    try: fid_dm = timing_model.DM.value
+    except AttributeError:
+        print(f'\nNo fiducial DM present in the timing model')
+        print(f'\nUsing DM = 0 as reference')
+        fid_dm = 0.0
+        
+    signal += fid_dm
+    return signal
+
+def prior_transform(params, show=True, theta=None):
+    '''
+        Function to get the prior transform for dispersive noise parameters
+        InParams: a list of DispParam parameters, flag to show the results and parameter sample vector
+        Output: the transformed prior distributions for the parameters if parameter sample vector
+                is provided, otherwise an array of prior distributions
+    '''
+    if isinstance(params, list):
+        for param in params:
+            if not isinstance(param, DispParam):
+                raise TypeError(f'Invalid parameter type for {param.name}')
+    else:
+        raise TypeError(f'A list of DispParam parameters should be provided')
+    
+    mins = np.array([float(param.min) for param in params])
+    maxs = np.array([float(param.max) for param in params])
+    spans = maxs - mins
+    if not np.any(theta):
+        priors = np.array([stats.uniform(loc=low, scale=span) for low, span in zip(mins, spans)])
+        if show:
+            print(f'\nPrior Distributions:')
+            for pname, dist in zip([param.name for param in params], priors):
+                a, b = dist.support()
+                print(f'\n\t{pname}: U({a:.3g}, {b:.3g})')
+    else:
+        priors = spans * theta + mins
+    
+    return priors
+
+def UniformPrior(value, pmin, pmax):
+    '''
+        Function to give uniform prior distribution
+        InParams: parameter sample value, parameter minimum value and parameter maximum value
+        Output: the Uniform prior value for a given parameter sample
+    '''
+    prior = ((value >= pmin) & (value <= pmax)) / (pmax - pmin)
+    
+    return prior
+
+def get_lnprior(theta, params, vectorise=False):
+    '''
+        Function to get the log-prior for different parameters
+        InParams: parameter sample vector and list of DispParam parameters and 
+                  flag to vectorise the likelihood computations
+        Output: the log-prior value as per the parameter samples
+    '''
+    mins = np.array([float(param.min) for param in params])
+    maxs = np.array([float(param.max) for param in params])
+
+    if not vectorise:
+        lnprior = np.sum([np.log(UniformPrior(value, pmin, pmax)) for 
+                          value, pmin, pmax in zip(theta, mins, maxs)])
+    else:
+        lnprior = np.sum([[np.log(UniformPrior(value, pmin, pmax)) for 
+                          value, pmin, pmax in zip(theta[idx, :], mins, maxs)]
+                          for idx in range(theta.shape[0])], axis=1)
+    return lnprior
+
+def get_lnpost(theta, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, 
+               timing_model, DMNharm, SWNharm, fref, dispefacparams, dispequadparams, 
+               dmnparams, swnparams, swdetparams, orders, U, vectorise):
+    '''
+        Function to get the log-posterior for different paramters
+        InParams: parameter sample vector, list of DispParam parameters, DMs in pc/cm^3, DM errors in pc/cm^3, 
+                  time array in s, time span in s, reference epoch for DM, reference epoch for SW, 
+                  ToAs object (PINT), list of DM flags, timing model object (PINT), DMN harmonics, 
+                  SWN harmonics, the chromatic reference frequency in MHz, array of DISPEFAC parameters, 
+                  array of DISPEQUAD parameters, array pf DM noise parameters, array of SW noise parameters, 
+                  array of deterministic SW parameters, array of their orders, noise basis matrix and
+                  flag to vectorise the likelihood computations
+        Output: the log-posterior value as per the parameter samples
+    '''
+    lnprior = get_lnprior(theta, params, vectorise)
+    
+    if not np.any(np.isfinite(lnprior)):
+        return lnprior
+    else:
+        return lnprior + get_lnlike_optimised(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, 
+                                              timing_model, DMNharm, SWNharm, fref, dispefacparams, 
+                                              dispequadparams, dmnparams, swnparams, swdetparams, orders, U, 
+                                              vectorise=vectorise)
+
+def get_lnlike_optimised(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, 
+                         timing_model, DMNharm, SWNharm, fref, dispefacparams, dispequadparams, 
+                         dmnparams, swnparams, swdetparams, orders, U, vectorise):
+    '''
+        Function to get the log-likelihood in an optimised form for all the sampled parameters
+        InParams: parameter sample vector, list of DispParam parameters, DMs in pc/cm^3, DM errors in pc/cm^3, 
+                  time array in s, time span in s, reference epoch for DM, reference epoch for SW, 
+                  ToAs object (PINT), list of DM flags, timing model object (PINT), DMN harmonics, 
+                  SWN harmonics, the chromatic reference frequency in MHz, array of DISPEFAC parameters, 
+                  array of DISPEQUAD parameters, array pf DM noise parameters, array of SW noise parameters, 
+                  array of deterministic SW parameters, array of their orders, noise basis matrix and 
+                  flag to vectorise the likelihood computations
+        Output: the log-likelihood value as per the parameters
+    '''
+    key = tuple(np.round(theta, 10))
+    if not vectorise:
+        if key in _cache.keys():
+            return _cache[key]
+    
+    N = get_Nmat(theta, dmerrs, dispefacparams, dispequadparams, vectorise=vectorise)
+    Phi = get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, vectorise=vectorise)
+    swdet = get_swdetsignal(t, Tref_sw, toas, timing_model, theta, swdetparams, orders, vectorise=vectorise)
+    y = dms - swdet
+    
+    if not vectorise:
+        Ninv_y = y / N
+        y_Ninv_y = y @ Ninv_y
+        Ninv_U = U / N[:, None]
+        UT_Ninv_y = Ninv_U.T @ y
+        UT_Ninv_U = U.T @ Ninv_U
+        Sigmainv = np.diag(1/Phi) + UT_Ninv_U
+        try:
+            Sigmainv_cf = sl.cho_factor(Sigmainv)
+            Sigmainv_UT_Ninv_y = sl.cho_solve(Sigmainv_cf, UT_Ninv_y)
+            y_Ninv_U_Sigma_UT_Ninv_y = UT_Ninv_y @ Sigmainv_UT_Ninv_y
+            y_Cinv_y = y_Ninv_y - y_Ninv_U_Sigma_UT_Ninv_y
+            logdet_N = np.sum(np.log(N))
+            logdet_Sigmainv = 2*np.sum(np.log(np.diag(Sigmainv_cf[0])))
+            logdet_Phi = np.sum(np.log(Phi))
+            logdet_C = logdet_N + logdet_Sigmainv + logdet_Phi
+            lnlike = -0.5*(y_Cinv_y + logdet_C)
+        except Exception:
+            lnlike = -np.inf
+        _cache[key] = lnlike
+        
+    else:        
+        lnlike = np.zeros(theta.shape[0])
+        for w in range(theta.shape[0]):
+            Nw = N[w]
+            Phiw = Phi[w]
+            yw = y[w]
+            Ninv_yw = yw / Nw
+            y_Ninv_yw = yw @ Ninv_yw
+            Ninv_Uw = U / Nw[:, None]
+            UT_Ninv_yw = Ninv_Uw.T @ yw
+            UT_Ninv_Uw = U.T @ Ninv_Uw
+            Sigmainvw = np.diag(1/Phiw) + UT_Ninv_Uw
+            try:
+                Sigmainv_cf = sl.cho_factor(Sigmainvw)
+                Sigmainv_UT_Ninv_yw = sl.cho_solve(Sigmainv_cf, UT_Ninv_yw)
+                y_Ninv_U_Sigma_UT_Ninv_yw = UT_Ninv_yw @ Sigmainv_UT_Ninv_yw
+                y_Cinv_yw = y_Ninv_yw - y_Ninv_U_Sigma_UT_Ninv_yw
+                logdet_Nw = np.sum(np.log(Nw))
+                logdet_Sigmainvw = 2*np.sum(np.log(np.diag(Sigmainv_cf[0])))
+                logdet_Phiw = np.sum(np.log(Phiw))
+                logdet_Cw = logdet_Nw + logdet_Sigmainvw + logdet_Phiw
+                lnlike[w] = -0.5*(y_Cinv_yw + logdet_Cw)
+            except Exception:
+                lnlike[w] = -np.inf
+    
+    return lnlike
+
+def get_realisation(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, 
+                    timing_model, DMNharm, SWNharm, fref, dispefacparams, dispequadparams, 
+                    dmnparams, swnparams, swdetparams, orders, U, vectorise=False):
+    '''
+        Function to get a random time-domain realisation of stochastic noise processes
+        InParams: parameter sample vector, list of DispParam parameters, DMs in pc/cm^3, DM errors in pc/cm^3, 
+                  time array in s, time span in s, reference epoch for DM, reference epoch for SW, ToAs object (PINT), 
+                  list of DM flags, timing model object (PINT), DMN harmonics, SWN harmonics, 
+                  the chromatic reference frequency in MHz, array of DISPEFAC parameters, 
+                  array of DISPEQUAD parameters, array pf DM noise parameters, array of SW noise parameters, 
+                  array of deterministic SW parameters, array of their orders, noise basis matrix and 
+                  flag to vectorise the likelihood computations
+        Output: an array of a random time-domain realisation of the stochastic processes
+    '''
+    N = get_Nmat(theta, dmerrs, dispefacparams, dispequadparams, vectorise=vectorise)
+    Phi = get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, vectorise=vectorise)
+    swdet = get_swdetsignal(t, Tref_sw, toas, timing_model, theta, swdetparams, orders, vectorise=vectorise)
+    y = dms - swdet
+
+    Ninv_U = U / N[:, None]
+    UT_Ninv_y = y @ Ninv_U
+    Sigmainv = np.diag(Phi) + U.T @ Ninv_U
+    Sigmainv_cf = sl.cholesky(Sigmainv, lower=False)
+    a_hat = sl.cho_solve((Sigmainv_cf, False), UT_Ninv_y)
+    z = np.random.randn(len(a_hat))
+    a = a_hat + sl.solve_triangular(Sigmainv_cf, z, lower=False)
+    realisation = U @ a
+    
+    return realisation
+
 def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, 
                       flags, DMNharm, SWNharm, fref, outdir, psrname, toas, timing_model, 
                       dispefacparams, dispequadparams, dmnparams, swnparams, swdetparams, orders, 
-                      threshold, add_dms, n_realisations, save=True, no_title=True):
+                      threshold, add_dms, n_realisations, U, save=True, no_title=True, vectorise=False):
     '''
         Function to plot the time-domain realisations of the full DM process including stochastic noises
         InParams: number of realisations to be plotted, posterior chains of sampled parameters, 
@@ -548,7 +627,8 @@ def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw,
                   array pf DM noise parameters, array of SW noise parameters, array of deterministic SW parameters, 
                   array of their orders, threshold for calculating the randomness in generated realisations, 
                   flag to add DM time series to the realisations, number of realisations to be generated, 
-                  flag to save the plot and flag to add title in the plot
+                  noise basis matrix, flag to save the plot, flag to add title in the plot and 
+                  flag to vectorise the likelihood computations
         Output: None
     '''
     param_choices = np.zeros((n_realisations, len(params)))
@@ -576,13 +656,13 @@ def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw,
 
     DMdet_signal = DM + DM1*(t-Tref_dm)*u.s.to(u.year) + DM2*0.5*((t-Tref_dm)*u.s.to(u.year))**2
     
-    # The realisations only provide the variations due to the stochastic processes
     full_signal = np.zeros((n_realisations, t.size))
     for i in range(n_realisations):
         realisation = get_realisation(param_choices[i, :], dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, 
                                       flags, timing_model, DMNharm, SWNharm, fref, dispefacparams, dispequadparams, 
-                                      dmnparams, swnparams, swdetparams, orders)
-        SWdet_signal = get_swdetsignal(t, Tref_sw, toas, timing_model, param_choices[i, :], swdetparams, orders) - DM
+                                      dmnparams, swnparams, swdetparams, orders, U, vectorise=vectorise)
+        SWdet_signal = get_swdetsignal(t, Tref_sw, toas, timing_model, param_choices[i, :], 
+                                       swdetparams, orders, vectorise=vectorise) - DM
         full_signal[i, :] = DMdet_signal + SWdet_signal + realisation
 
     if add_dms:
@@ -622,7 +702,7 @@ def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw,
 def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psrname, t, dms, dmerrs, Tspan, 
                  Tref_dm, Tref_sw, toas, flags, timing_model, fref, plotchains, truthsfile, dispefacparams, 
                  dispequadparams, dmnparams, swnparams, swdetparams, orders, plot_generated_realisations, 
-                 threshold, add_dms, n_realisations):
+                 threshold, add_dms, n_realisations, vectorise, use_pool):
     '''
         Function to sample the posteriors of dispersive noise processes
         InParams: Sampler name, list of DispParam parameters, Number of emcee samples per walker, 
@@ -634,15 +714,17 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psr
                   array pf DM noise parameters, array of SW noise parameters, array of deterministic SW parameters, 
                   array of their orders, flag to plot the generated realisations of the extracted processes, 
                   threshold for calculating the randomness in generated realisations, 
-                  flag to add DM time series to the realisations and number of realisations to be generated
+                  flag to add DM time series to the realisations, number of realisations to be generated, 
+                  flag to vectorise the likelihood evaluations and flag to use multiprocessing pool
         Output: None
     '''
     Ndim = len(params)
     chainfile = f'{chaindir}/{psrname}.psrdisp.chains.npy'
     param_names = [param.name for param in params]
     param_labels = [param.label for param in params]
+    U = get_Umat(t, Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, toas, timing_model, DMNharm, SWNharm, fref)
     args = (params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, timing_model, DMNharm, SWNharm, fref, 
-            dispefacparams, dispequadparams, dmnparams, swnparams, swdetparams, orders)
+            dispefacparams, dispequadparams, dmnparams, swnparams, swdetparams, orders, U, vectorise)
     if os.path.isfile(chainfile):
         print(f'\nUsing the existing chains from {chainfile}')
         chains = np.load(chainfile)
@@ -655,43 +737,60 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psr
             print(f'\nNdim: {Ndim}, Nsamples (per walker): {Nsamples}, Nwalkers: {Nwalkers}')
             p0 = np.array([prior_transform(params=params, show=False, theta=theta) for 
                            theta in np.random.rand(Nwalkers, Ndim)])
-            with mp.Pool() as pool:
+            if use_pool:
+                print(f'\nRunning with multiprocessing')
+                with mp.Pool() as pool:
+                    sampler = emcee.EnsembleSampler(Nwalkers, Ndim, get_lnpost, 
+                                                    args=args, pool=pool, vectorize=vectorise)
+                    sampler.run_mcmc(p0, Nsamples, progress=True, store=True)
+            else:
+                print(f'\nRunning without multiprocessing')
                 sampler = emcee.EnsembleSampler(Nwalkers, Ndim, get_lnpost, 
-                                                args=args, pool=pool)
+                                                args=args, pool=None, vectorize=vectorise)
                 sampler.run_mcmc(p0, Nsamples, progress=True, store=True)
-                chains = sampler.get_chain(flat=True, discard=Nburn, thin=Nthin)
-                print(f'\nPlotting the chains for all parameters')
-                if plotchains:
-                    for dim in range(Ndim):
-                        plt.figure(figsize=(10, 3), dpi=100)
-                        plt.plot(chains[Nburn:, dim], color='crimson', alpha=0.3)
-                        plt.xlabel(f'Samples', fontweight='bold', fontsize=10)
-                        plt.ylabel(f'Value', fontweight='bold', fontsize=10)
-                        plt.title(f'{params[dim].label}', fontweight='bold', fontsize=13)
-                        plt.grid(True, alpha=0.5, ls='dashed')
-                        plt.tight_layout()
-                        plt.savefig(f'{chaindir}/{params[dim].name}.chains.pdf', dpi=150)
+                
+            chains = sampler.get_chain(flat=True, discard=Nburn, thin=Nthin)
         
         elif name == 'pocomc':
             Nburn = 0
             priors = prior_transform(params=params, show=True)
             prior = pc.Prior(priors)
-            try:
-                with pc.parallel.MPIPool() as pool:
-                    print(f'\nRunning with MPI-enabled pooling')
-                    sampler = pc.Sampler(prior=prior, likelihood=get_lnlike_optimised, likelihood_args=args[1:],
+            if use_pool:
+                try:
+                    with pc.parallel.MPIPool() as pool:
+                        print(f'\nRunning with MPI-enabled pooling')
+                        sampler = pc.Sampler(prior=prior, likelihood=get_lnlike_optimised, likelihood_args=args[1:],
+                                             n_effective=None, n_active=256, random_state=None, 
+                                             pool=pool, output_dir=chaindir, vectorize=vectorise)
+                        sampler.run(save_every=None, n_total=2048, n_evidence=2048)
+                        
+                except Exception:
+                    print(f'\nRunning without MPI but using {os.cpu_count()} processors')
+                    sampler = pc.Sampler(prior=prior, likelihood=get_lnlike_optimised, likelihood_args=args[1:], 
                                          n_effective=None, n_active=256, random_state=None, 
-                                         pool=pool, output_dir=chaindir)
+                                         pool=os.cpu_count(), output_dir=chaindir, vectorize=vectorise)
                     sampler.run(save_every=None, n_total=2048, n_evidence=2048)
-                    chains, lnlike, lnpost = sampler.posterior(resample=True)
-            except Exception:
-                print(f'\nRunning without MPI but using {os.cpu_count()} processors')
+            else:
+                print(f'\nRunning without multiprocessing')
                 sampler = pc.Sampler(prior=prior, likelihood=get_lnlike_optimised, likelihood_args=args[1:], 
                                      n_effective=None, n_active=256, random_state=None, 
-                                     pool=os.cpu_count(), output_dir=chaindir)
+                                     pool=None, output_dir=chaindir, vectorize=vectorise)
                 sampler.run(save_every=None, n_total=2048, n_evidence=2048)
-                chains, lnlike, lnpost = sampler.posterior(resample=True)
 
+            chains, lnlike, lnpost = sampler.posterior(resample=True)
+        
+        if plotchains:
+            print(f'\nPlotting the chains for all parameters')
+            for dim in range(Ndim):
+                plt.figure(figsize=(10, 3), dpi=100)
+                plt.plot(chains[Nburn:, dim], color='crimson', alpha=0.3)
+                plt.xlabel(f'Samples', fontweight='bold', fontsize=10)
+                plt.ylabel(f'Value', fontweight='bold', fontsize=10)
+                plt.title(f'{params[dim].label}', fontweight='bold', fontsize=13)
+                plt.grid(True, alpha=0.5, ls='dashed')
+                plt.tight_layout()
+                plt.savefig(f'{chaindir}/{params[dim].name}.chains.pdf', dpi=150)
+        
         print(f'\nSaving the posterior chains in {chainfile}')
         np.save(chainfile, chains)
 
@@ -730,4 +829,4 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psr
                           fref=fref, outdir=outdir, psrname=psrname, toas=toas, timing_model=timing_model, 
                           dispefacparams=dispefacparams, dispequadparams=dispequadparams, dmnparams=dmnparams, 
                           swnparams=swnparams, swdetparams=swdetparams, orders=orders, threshold=threshold, 
-                          add_dms=add_dms, n_realisations=n_realisations)
+                          add_dms=add_dms, n_realisations=n_realisations, U=U, vectorise=False)
