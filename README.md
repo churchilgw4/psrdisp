@@ -17,19 +17,6 @@ python3 psrdisp.py --psrname PSR --parfile ./sample/sample.par --dmfile ./sample
                    --add_dms --n_realisations 20
 ```
 
-## Requirements
-```
-NUMPY
-ASTROPY
-PINT-PULSAR
-MATPLOTLIB
-SCIPY
-EMCEE
-CORNER
-POCOMC
-
-```
-
 ## Citation
 ```
 @ARTICLE{2027JHEAp..5500722D,
@@ -49,4 +36,17 @@ archivePrefix = {arXiv},
        adsurl = {https://ui.adsabs.harvard.edu/abs/2027JHEAp..5500722D},
       adsnote = {Provided by the SAO/NASA Astrophysics Data System}
 }
+```
+
+## Requirements
+```
+NUMPY
+ASTROPY
+PINT-PULSAR
+MATPLOTLIB
+SCIPY
+EMCEE
+CORNER
+POCOMC
+
 ```
