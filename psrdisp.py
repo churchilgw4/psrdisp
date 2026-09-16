@@ -154,7 +154,7 @@ if __name__ == '__main__':
     swnparams = np.array([param for param in params if param.is_red and 'SW' in param.name])
     swdetparams = [param for param in params if param.is_deterministic and 'NE_SW' in param.name]
     orders = np.array([int(param.name.split('NE_SW')[-1]) if param.name.split('NE_SW')[-1] else 0 
-              for param in swdetparams])
+                       for param in swdetparams])
 
     if args.vectorise and args.pool:
         print(f'\nCannot use multiprocessing along with vectorisation to perform computations')
