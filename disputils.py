@@ -795,20 +795,25 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psr
 
             chains, lnlike, lnpost = sampler.posterior(resample=True)
         
-        if plotchains:
-            print(f'\nPlotting the chains for all parameters')
-            for dim in range(Ndim):
-                plt.figure(figsize=(10, 3), dpi=100)
-                plt.plot(chains[Nburn:, dim], color='crimson', alpha=0.3)
-                plt.xlabel(f'Samples', fontweight='bold', fontsize=10)
-                plt.ylabel(f'Value', fontweight='bold', fontsize=10)
-                plt.title(f'{params[dim].label}', fontweight='bold', fontsize=13)
-                plt.grid(True, alpha=0.5, ls='dashed')
-                plt.tight_layout()
-                plt.savefig(f'{chaindir}/{params[dim].name}.chains.pdf', dpi=150)
-        
         print(f'\nSaving the posterior chains in {chainfile}')
         np.save(chainfile, chains)
+
+    if plotchains:
+        try:
+            if not Nburn:
+                Nburn = chains.shape[0]//4
+        except Exception:
+            Nburn = chains.shape[0]//4
+        print(f'\nPlotting the chains for all parameters')
+        for dim in range(Ndim):
+            plt.figure(figsize=(10, 3), dpi=100)
+            plt.plot(chains[Nburn:, dim], color='crimson', alpha=0.3)
+            plt.xlabel(f'Samples', fontweight='bold', fontsize=10)
+            plt.ylabel(f'Value', fontweight='bold', fontsize=10)
+            plt.title(f'{params[dim].label}', fontweight='bold', fontsize=13)
+            plt.grid(True, alpha=0.5, ls='dashed')
+            plt.tight_layout()
+            plt.savefig(f'{chaindir}/{params[dim].name}.chains.pdf', dpi=150)
 
     medians = np.median(chains, axis=0)
     median_dict = {}
