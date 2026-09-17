@@ -229,16 +229,15 @@ def broken_powerlaw(f, log10_A, gamma, delta, fb, kappa):
     pl = hcf**2/(12*np.pi**2*f**3)
     return pl
 
-def get_Umat(t, Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, toas, timing_model, DMNharm, SWNharm, fref):
+def get_Umat(t, Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, geometric_factor, DMNharm, SWNharm, fref):
     '''
         Function to get the basis matrix for Fourier domain red noise process
         This implementation considers SWEPOCH to be the same as the DMEPOCH
         Also, the entries for DMGP and SWGP are scaled with fref**2/DMconst to make them coherent
         with the definitions in ENTERPRSIE (taking fref as 1400 MHz for comparison)
         InParams: time in s, time span in s, DM reference epoch in s, SW reference epoch in s, 
-                  array of DM noise parameters, array of SW noise parameters, ToAs object (PINT), 
-                  timing model onject (PINT), DM noise harmonics, SW noise harmonics 
-                  and chromatic reference frequency in MHz
+                  array of DM noise parameters, array of SW noise parameters, SW geometric factor (PINT), 
+                  DM noise harmonics, SW noise harmonics and chromatic reference frequency in MHz
         Output: the DM basis matrix
     '''
     if dmnparams.size:
@@ -249,7 +248,7 @@ def get_Umat(t, Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, toas, timing_mode
 
     if swnparams.size:
         f_swn = get_freqs(Tspan, SWNharm)
-        dm_sw = get_dm_sw(toas, timing_model, n_earth=1.0)
+        dm_sw = get_dm_sw(n_earth=1.0, geometric_factor=geometric_factor)
     else:
         f_swn = np.zeros(0)
 
@@ -374,29 +373,39 @@ def get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd='powerl
     
     return np.array(Phi)
 
-def get_dm_sw(toas, timing_model, n_earth, vectorise=False):
+def get_sw_geometry(timing_model, toas):
     '''
-        Function to return the DM contribution from solar wind
-        InParams: ToAs object (PINT), timing model object (PINT), solar-wind electron density in 1/cm^3
-                  and flag to vectorise the likelihood computations
-        Output: the DM induced by the solar-wind electron density
+        Function to return the SW geometric factor for a given set of ToAs
+        InParams: timing model object (PINT) and ToAs object (PINT)
+        Output: the SW geometric factor
     '''
     if 'SolarWindDispersion' in timing_model.components:
         geometric_factor = timing_model.components['SolarWindDispersion'].solar_wind_geometry(toas).value
-        if not vectorise:
-            dm_sw = n_earth*geometric_factor
-        else:
-            dm_sw = n_earth[:, None]*geometric_factor
     else:
         raise KeyError(f'The SolarWindDispersion component is absent in the timing model')
     
+    return geometric_factor
+
+def get_dm_sw(n_earth, geometric_factor, vectorise=False):
+    '''
+        Function to return the DM contribution from solar wind
+        InParams: solar-wind electron density in 1/cm^3, SW geometric factor (PINT)
+                  and flag to vectorise the likelihood computations
+        Output: the DM induced by the solar-wind electron density
+    '''
+    if not vectorise:
+        dm_sw = n_earth*geometric_factor
+    else:
+        dm_sw = n_earth[:, None]*geometric_factor
+    
     return dm_sw
 
-def get_swdetsignal(t, Tref_sw, toas, timing_model, theta, swdetparams, orders, vectorise=False):
+def get_swdetsignal(t, Tref_sw, theta, swdetparams, orders, timing_model, geometric_factor, vectorise=False):
     '''
         Function to get a deterministic signal for the solar-wind process
-        InParams: time in s, SW reference epoch in s, ToAs object (PINT), timing model object (PINT), 
-                  parameter sample vector, array of deterministic SW parameters, array of their orders
+        InParams: time in s, SW reference epoch in s, SW geometric factor (PINT), 
+                  parameter sample vector, array of deterministic SW parameters, 
+                  array of their orders, timing model object (PINT), SW geometric factor (PINT)
                   and flag to vectorise the likelihood computations
         Output: the DM contribution from deterministic SW process with a polynomial form
     '''
@@ -409,14 +418,14 @@ def get_swdetsignal(t, Tref_sw, toas, timing_model, theta, swdetparams, orders, 
         if not vectorise:
             signal = np.zeros(t.size)
             for param, order in zip(swdetparams, orders):
-                signal += get_dm_sw(toas, timing_model, 
-                                    theta[param.idx], 
+                signal += get_dm_sw(theta[param.idx], 
+                                    geometric_factor, 
                                     vectorise)*((t-Tref_sw)*u.s.to(u.year))**order/factorial(order)
         else:
             signal = np.zeros((theta.shape[0], t.size))
             for param, order in zip(swdetparams, orders):
-                signal += get_dm_sw(toas, timing_model, 
-                                    theta[:, param.idx], 
+                signal += get_dm_sw(theta[:, param.idx], 
+                                    geometric_factor, 
                                     vectorise)*((t-Tref_sw)*u.s.to(u.year))**order/factorial(order)
 
     try: fid_dm = timing_model.DM.value
@@ -488,7 +497,7 @@ def get_lnprior(theta, params, vectorise=False):
 
 def get_lnpost(theta, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, 
                timing_model, DMNharm, SWNharm, fref, dispefacparams, dispequadparams, 
-               dmnparams, swnparams, swdetparams, orders, U, vectorise):
+               dmnparams, swnparams, swdetparams, orders, U, geometric_factor, vectorise):
     '''
         Function to get the log-posterior for different paramters
         InParams: parameter sample vector, list of DispParam parameters, DMs in pc/cm^3, DM errors in pc/cm^3, 
@@ -496,8 +505,8 @@ def get_lnpost(theta, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, fla
                   ToAs object (PINT), list of DM flags, timing model object (PINT), DMN harmonics, 
                   SWN harmonics, the chromatic reference frequency in MHz, array of DISPEFAC parameters, 
                   array of DISPEQUAD parameters, array pf DM noise parameters, array of SW noise parameters, 
-                  array of deterministic SW parameters, array of their orders, noise basis matrix and
-                  flag to vectorise the likelihood computations
+                  array of deterministic SW parameters, array of their orders, noise basis matrix
+                  SW geometric factor (PINT) and flag to vectorise the likelihood computations
         Output: the log-posterior value as per the parameter samples
     '''
     lnprior = get_lnprior(theta, params, vectorise)
@@ -508,11 +517,11 @@ def get_lnpost(theta, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, fla
         return lnprior + get_lnlike_optimised(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, 
                                               timing_model, DMNharm, SWNharm, fref, dispefacparams, 
                                               dispequadparams, dmnparams, swnparams, swdetparams, orders, U, 
-                                              vectorise=vectorise)
+                                              geometric_factor, vectorise=vectorise)
 
 def get_lnlike_optimised(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, 
                          timing_model, DMNharm, SWNharm, fref, dispefacparams, dispequadparams, 
-                         dmnparams, swnparams, swdetparams, orders, U, vectorise):
+                         dmnparams, swnparams, swdetparams, orders, U, geometric_factor, vectorise):
     '''
         Function to get the log-likelihood in an optimised form for all the sampled parameters
         InParams: parameter sample vector, list of DispParam parameters, DMs in pc/cm^3, DM errors in pc/cm^3, 
@@ -520,10 +529,11 @@ def get_lnlike_optimised(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, f
                   ToAs object (PINT), list of DM flags, timing model object (PINT), DMN harmonics, 
                   SWN harmonics, the chromatic reference frequency in MHz, array of DISPEFAC parameters, 
                   array of DISPEQUAD parameters, array pf DM noise parameters, array of SW noise parameters, 
-                  array of deterministic SW parameters, array of their orders, noise basis matrix and 
-                  flag to vectorise the likelihood computations
+                  array of deterministic SW parameters, array of their orders, noise basis matrix, 
+                  SW geometric factor (PINT) and flag to vectorise the likelihood computations
         Output: the log-likelihood value as per the parameters
     '''
+    # Useful in case the sampler gets stuck
     key = tuple(np.round(theta, 10))
     if not vectorise:
         if key in _cache.keys():
@@ -531,7 +541,8 @@ def get_lnlike_optimised(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, f
     
     N = get_Nmat(theta, dmerrs, dispefacparams, dispequadparams, vectorise=vectorise)
     Phi = get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, vectorise=vectorise)
-    swdet = get_swdetsignal(t, Tref_sw, toas, timing_model, theta, swdetparams, orders, vectorise=vectorise)
+    swdet = get_swdetsignal(t, Tref_sw, theta, swdetparams, orders, timing_model, geometric_factor, 
+                            vectorise=vectorise)
     y = dms - swdet
     
     if not vectorise:
@@ -584,7 +595,7 @@ def get_lnlike_optimised(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, f
 
 def get_realisation(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, 
                     timing_model, DMNharm, SWNharm, fref, dispefacparams, dispequadparams, 
-                    dmnparams, swnparams, swdetparams, orders, U, vectorise=False):
+                    dmnparams, swnparams, swdetparams, orders, U, geometric_factor, vectorise=False):
     '''
         Function to get a random time-domain realisation of stochastic noise processes
         InParams: parameter sample vector, list of DispParam parameters, DMs in pc/cm^3, DM errors in pc/cm^3, 
@@ -592,13 +603,14 @@ def get_realisation(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags,
                   list of DM flags, timing model object (PINT), DMN harmonics, SWN harmonics, 
                   the chromatic reference frequency in MHz, array of DISPEFAC parameters, 
                   array of DISPEQUAD parameters, array pf DM noise parameters, array of SW noise parameters, 
-                  array of deterministic SW parameters, array of their orders, noise basis matrix and 
-                  flag to vectorise the likelihood computations
+                  array of deterministic SW parameters, array of their orders, noise basis matrix, 
+                  SW geometric factor (PINT) and flag to vectorise the likelihood computations
         Output: an array of a random time-domain realisation of the stochastic processes
     '''
     N = get_Nmat(theta, dmerrs, dispefacparams, dispequadparams, vectorise=vectorise)
     Phi = get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, vectorise=vectorise)
-    swdet = get_swdetsignal(t, Tref_sw, toas, timing_model, theta, swdetparams, orders, vectorise=vectorise)
+    swdet = get_swdetsignal(t, Tref_sw, theta, swdetparams, orders, timing_model, geometric_factor, 
+                            vectorise=vectorise)
     y = dms - swdet
 
     Ninv_U = U / N[:, None]
@@ -615,7 +627,8 @@ def get_realisation(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags,
 def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, 
                       flags, DMNharm, SWNharm, fref, outdir, psrname, toas, timing_model, 
                       dispefacparams, dispequadparams, dmnparams, swnparams, swdetparams, orders, 
-                      threshold, add_dms, n_realisations, U, save=True, no_title=True, vectorise=False):
+                      threshold, add_dms, n_realisations, U, geometric_factor, save=True, 
+                      no_title=True, vectorise=False):
     '''
         Function to plot the time-domain realisations of the full DM process including stochastic noises
         InParams: number of realisations to be plotted, posterior chains of sampled parameters, 
@@ -627,8 +640,8 @@ def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw,
                   array pf DM noise parameters, array of SW noise parameters, array of deterministic SW parameters, 
                   array of their orders, threshold for calculating the randomness in generated realisations, 
                   flag to add DM time series to the realisations, number of realisations to be generated, 
-                  noise basis matrix, flag to save the plot, flag to add title in the plot and 
-                  flag to vectorise the likelihood computations
+                  noise basis matrix, SW geoemtric factor (PINT), flag to save the plot, 
+                  flag to add title in the plot and flag to vectorise the likelihood computations
         Output: None
     '''
     param_choices = np.zeros((n_realisations, len(params)))
@@ -659,10 +672,11 @@ def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw,
     full_signal = np.zeros((n_realisations, t.size))
     for i in range(n_realisations):
         realisation = get_realisation(param_choices[i, :], dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, 
-                                      flags, timing_model, DMNharm, SWNharm, fref, dispefacparams, dispequadparams, 
-                                      dmnparams, swnparams, swdetparams, orders, U, vectorise=vectorise)
-        SWdet_signal = get_swdetsignal(t, Tref_sw, toas, timing_model, param_choices[i, :], 
-                                       swdetparams, orders, vectorise=vectorise) - DM
+                                      flags, timing_model, DMNharm, SWNharm, fref, dispefacparams, 
+                                      dispequadparams, dmnparams, swnparams, swdetparams, orders, U, 
+                                      geometric_factor, vectorise=vectorise)
+        SWdet_signal = get_swdetsignal(t, Tref_sw, param_choices[i, :], swdetparams, orders, 
+                                       timing_model, geometric_factor, vectorise=vectorise) - DM
         full_signal[i, :] = DMdet_signal + SWdet_signal + realisation
 
     if add_dms:
@@ -722,9 +736,11 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psr
     chainfile = f'{chaindir}/{psrname}.psrdisp.chains.npy'
     param_names = [param.name for param in params]
     param_labels = [param.label for param in params]
-    U = get_Umat(t, Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, toas, timing_model, DMNharm, SWNharm, fref)
-    args = (params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, timing_model, DMNharm, SWNharm, fref, 
-            dispefacparams, dispequadparams, dmnparams, swnparams, swdetparams, orders, U, vectorise)
+    geometric_factor = get_sw_geometry(timing_model, toas)
+    U = get_Umat(t, Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, geometric_factor, DMNharm, SWNharm, fref)
+    args = (params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, timing_model, 
+            DMNharm, SWNharm, fref, dispefacparams, dispequadparams, dmnparams, swnparams, 
+            swdetparams, orders, U, geometric_factor, vectorise)
     if os.path.isfile(chainfile):
         print(f'\nUsing the existing chains from {chainfile}')
         chains = np.load(chainfile)
@@ -829,4 +845,5 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psr
                           fref=fref, outdir=outdir, psrname=psrname, toas=toas, timing_model=timing_model, 
                           dispefacparams=dispefacparams, dispequadparams=dispequadparams, dmnparams=dmnparams, 
                           swnparams=swnparams, swdetparams=swdetparams, orders=orders, threshold=threshold, 
-                          add_dms=add_dms, n_realisations=n_realisations, U=U, vectorise=False)
+                          add_dms=add_dms, n_realisations=n_realisations, U=U, geometric_factor=geometric_factor, 
+                          save=True, no_title=True, vectorise=False)
