@@ -4,7 +4,7 @@ import argparse
 import time
 import sys
 
-from disputils import *
+from disputils_jax import *
 from pint.models.model_builder import get_model
 from pint.simulation import make_fake_toas_fromtim, make_fake_toas_fromMJDs
 from pint.logging import setup
