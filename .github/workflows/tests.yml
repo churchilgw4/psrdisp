@@ -40,7 +40,7 @@ jobs:
 
     - name: Run test
       run: |
-        pytest \
+        pytest code-tests \
           --cov=src \
           --cov-report=term-missing \
           --cov-report=xml \
