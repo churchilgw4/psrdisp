@@ -356,7 +356,7 @@ def get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, vector
                 raise ValueError(f'Cannot extract DMN spectral index from parameter file')
         
         elif psd == 'free-spectrum':
-            try: log10_rho_dmn = np.array([par for par in dmnparams if par.name == 'TNDMRHO'])
+            try: log10_rho_dmn = np.array([par for par in dmnparams if 'TNDMRHO' in par.name])
             except Exception as e:
                 raise ValueError(f'Cannot extract DMN amplitude from parameter file')
             if not f_dmn.size == log10_rho_dmn.size:
@@ -396,7 +396,7 @@ def get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, vector
                 raise ValueError(f'Cannot extract SWN spectral index from parameter file')
         
         elif psd == 'free-spectrum':
-            try: log10_rho_swn = np.array([par for par in swnparams if par.name == 'TNSWRHO'])
+            try: log10_rho_swn = np.array([par for par in swnparams if 'TNSWRHO' in par.name])
             except Exception as e:
                 raise ValueError(f'Cannot extract SWN amplitude from parameter file')
             if not f_swn.size == log10_rho_swn.size:
@@ -422,7 +422,7 @@ def get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, vector
             raise NotImplementedError(f'Currently only powerlaw, free-spectrum and broken powerlaw PSDs are supported')
     else:
         f_swn = np.zeros(0)
-
+    
     if not vectorise:
         Phi = []
         Phi.extend([1e+40, 1e+40, 1e+40])
@@ -430,27 +430,35 @@ def get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, vector
             dmn = np.zeros(2*f_dmn.size)
             for i in range(f_dmn.size):
                 if psd == 'powerlaw':
-                    dmn[2*i] = dmn[2*i+1] = powerlaw(f_dmn[i], Tspan, log10_A=theta[log10_A_dmn.idx], 
+                    dmn[2*i] = dmn[2*i+1] = powerlaw(f_dmn[i], Tspan, 
+                                                     log10_A=theta[log10_A_dmn.idx], 
                                                      gamma=theta[gamma_dmn.idx])
                 elif psd == 'free-spectrum':
                     dmn[2*i] = dmn[2*i+1] = free_spectrum(log10_rho=theta[log10_rho_dmn[i].idx])
                 elif psd == 'broken-powerlaw':
-                    dmn[2*i] = dmn[2*i+1] = broken_powerlaw(f_dmn[i], log10_A=theta[log10_A_dmn.idx], 
-                                                            gamma=theta[gamma_dmn.idx], delta=theta[delta_dmn.idx], 
-                                                            log10_fb=theta[log10_fb_dmn.idx], kappa=theta[kappa_dmn.idx])
+                    dmn[2*i] = dmn[2*i+1] = broken_powerlaw(f_dmn[i], 
+                                                            log10_A=theta[log10_A_dmn.idx], 
+                                                            gamma=theta[gamma_dmn.idx], 
+                                                            delta=theta[delta_dmn.idx], 
+                                                            log10_fb=theta[log10_fb_dmn.idx], 
+                                                            kappa=theta[kappa_dmn.idx])
             Phi.extend(dmn)
         if f_swn.size:
             swn = np.zeros(2*f_swn.size)
             for i in range(f_swn.size):
                 if psd == 'powerlaw':
-                    swn[2*i] = swn[2*i+1] = powerlaw(f_swn[i], Tspan, log10_A=theta[log10_A_swn.idx], 
+                    swn[2*i] = swn[2*i+1] = powerlaw(f_swn[i], Tspan, 
+                                                     log10_A=theta[log10_A_swn.idx], 
                                                      gamma=theta[gamma_swn.idx])
                 elif psd == 'free-spectrum':
                     swn[2*i] = swn[2*i+1] = free_spectrum(log10_rho=theta[log10_rho_swn[i].idx])
                 elif psd == 'broken-powerlaw':
-                    swn[2*i] = swn[2*i+1] = broken_powerlaw(f_swn[i], log10_A=theta[log10_A_swn.idx], 
-                                                            gamma=theta[gamma_swn.idx], delta=theta[delta_swn.idx], 
-                                                            log10_fb=theta[log10_fb_swn.idx], kappa=theta[kappa_swn.idx])
+                    swn[2*i] = swn[2*i+1] = broken_powerlaw(f_swn[i], 
+                                                            log10_A=theta[log10_A_swn.idx], 
+                                                            gamma=theta[gamma_swn.idx], 
+                                                            delta=theta[delta_swn.idx], 
+                                                            log10_fb=theta[log10_fb_swn.idx], 
+                                                            kappa=theta[kappa_swn.idx])
             Phi.extend(swn)
     else:
         Phi = [[] for walker in range(theta.shape[0])]
@@ -460,27 +468,34 @@ def get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, vector
                 dmn = np.zeros(2*f_dmn.size)
                 for i in range(f_dmn.size):
                     if psd == 'powerlaw':
-                        dmn[2*i] = dmn[2*i+1] = powerlaw(f_dmn[i], Tspan, log10_A=theta[log10_A_dmn.idx], 
-                                                         gamma=theta[gamma_dmn.idx])
+                        dmn[2*i] = dmn[2*i+1] = powerlaw(f_dmn[i], Tspan, 
+                                                         log10_A=theta[walker, log10_A_dmn.idx], 
+                                                         gamma=theta[walker, gamma_dmn.idx])
                     elif psd == 'free-spectrum':
-                        dmn[2*i] = dmn[2*i+1] = free_spectrum(log10_rho=theta[log10_rho_dmn[i].idx])
+                        dmn[2*i] = dmn[2*i+1] = free_spectrum(log10_rho=theta[walker, log10_rho_dmn[i].idx])
                     elif psd == 'broken-powerlaw':
-                        dmn[2*i] = dmn[2*i+1] = broken_powerlaw(f_dmn[i], log10_A=theta[log10_A_dmn.idx], 
-                                                                gamma=theta[gamma_dmn.idx], delta=theta[delta_dmn.idx], 
-                                                                log10_fb=theta[log10_fb_dmn.idx], kappa=theta[kappa_dmn.idx])
+                        dmn[2*i] = dmn[2*i+1] = broken_powerlaw(f_dmn[i], 
+                                                                log10_A=theta[walker, log10_A_dmn.idx], 
+                                                                gamma=theta[walker, gamma_dmn.idx], 
+                                                                delta=theta[walker, delta_dmn.idx], 
+                                                                log10_fb=theta[walker, log10_fb_dmn.idx], 
+                                                                kappa=theta[walker, kappa_dmn.idx])
                 Phi[walker].extend(dmn)
             if f_swn.size:
                 swn = np.zeros(2*f_swn.size)
                 for i in range(f_swn.size):
                     if psd == 'powerlaw':
-                        swn[2*i] = swn[2*i+1] = powerlaw(f_swn[i], Tspan, log10_A=theta[log10_A_swn.idx], 
-                                                         gamma=theta[gamma_swn.idx])
+                        swn[2*i] = swn[2*i+1] = powerlaw(f_swn[i], Tspan, 
+                                                         log10_A=theta[walker, log10_A_swn.idx], 
+                                                         gamma=theta[walker, gamma_swn.idx])
                     elif psd == 'free-spectrum':
-                        swn[2*i] = swn[2*i+1] = free_spectrum(log10_rho=theta[log10_rho_swn[i].idx])
+                        swn[2*i] = swn[2*i+1] = free_spectrum(log10_rho=theta[walker, log10_rho_swn[i].idx])
                     elif psd == 'broken-powerlaw':
-                        swn[2*i] = swn[2*i+1] = broken_powerlaw(f_swn[i], log10_A=theta[log10_A_swn.idx], 
-                                                                gamma=theta[gamma_swn.idx], delta=theta[delta_swn.idx], 
-                                                                log10_fb=theta[log10_fb_swn.idx], kappa=theta[kappa_swn.idx])
+                        swn[2*i] = swn[2*i+1] = broken_powerlaw(f_swn[i], log10_A=theta[walker, log10_A_swn.idx], 
+                                                                gamma=theta[walker, gamma_swn.idx], 
+                                                                delta=theta[walker, delta_swn.idx], 
+                                                                log10_fb=theta[walker, log10_fb_swn.idx], 
+                                                                kappa=theta[walker, kappa_swn.idx])
                 Phi[walker].extend(swn)
     
     return np.array(Phi)
@@ -743,7 +758,7 @@ def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw,
                       flags, DMNharm, SWNharm, fref, outdir, psrname, toas, timing_model, 
                       dispefacparams, dispequadparams, dmnparams, swnparams, swdetparams, orders, 
                       threshold, add_dms, n_realisations, U, geometric_factor, save=True, 
-                      no_title=True, vectorise=False):
+                      no_title=True, psd='powerlaw', vectorise=False):
     '''
         Function to plot the time-domain realisations of the full DM process including stochastic noises
         InParams: number of realisations to be plotted, posterior chains of sampled parameters, 
@@ -756,7 +771,8 @@ def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw,
                   array of their orders, threshold for calculating the randomness in generated realisations, 
                   flag to add DM time series to the realisations, number of realisations to be generated, 
                   noise basis matrix, SW geoemtric factor (PINT), flag to save the plot, 
-                  flag to add title in the plot and flag to vectorise the likelihood computations
+                  flag to add title in the plot, the PSD of the Fourier-domain noise processes and 
+                  flag to vectorise the likelihood computations
         Output: None
     '''
     param_choices = np.zeros((n_realisations, len(params)))
@@ -789,7 +805,7 @@ def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw,
         realisation = get_realisation(param_choices[i, :], dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, 
                                       flags, timing_model, DMNharm, SWNharm, fref, dispefacparams, 
                                       dispequadparams, dmnparams, swnparams, swdetparams, orders, U, 
-                                      geometric_factor, vectorise=vectorise)
+                                      geometric_factor, psd, vectorise=vectorise)
         SWdet_signal = get_swdetsignal(t, Tref_sw, param_choices[i, :], swdetparams, orders, 
                                        timing_model, geometric_factor, vectorise=vectorise) - DM
         full_signal[i, :] = DMdet_signal + SWdet_signal + realisation
@@ -827,6 +843,46 @@ def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw,
         plt.tight_layout()
         if save:
             plt.savefig(f'{outdir}/{psrname}.realisations.pdf', dpi=200)
+
+def plot_violins(log10_rho_dmn, log10_rho_swn, chains, outdir, psrname, showx=False):
+    '''
+        Function to generate the violin plot for Free-Spectrum processes
+    '''
+    if np.any(log10_rho_dmn):
+        paramidxs = [par.idx for par in log10_rho_dmn]
+        plt.figure(figsize=(10, 4), dpi=100)
+        violins = plt.violinplot(chains[:, paramidxs[0]:paramidxs[-1]+1], showmedians=True, showmeans=False)
+        for patch in violins['bodies']:
+            patch.set_facecolor(f'crimson')
+            patch.set_edgecolor(f'red')
+            patch.set_alpha(0.4)
+        violins['cmedians'].set_color('k')
+        violins['cmedians'].set_alpha(0.4)
+        plt.grid(True, alpha=0.5, ls='dashed')
+        if showx:
+            plt.xticks(range(1, len(paramidxs)+1), [par.label for par in log10_rho_dmn])
+        plt.xlabel(f'Spectral Bins', fontweight='bold', fontsize=10)
+        plt.ylabel(r'$\rho_{\rm DMN}$', fontweight='bold', fontsize=10)
+        plt.tight_layout()
+        plt.savefig(f'{outdir}/{psrname}.psrdisp.dmn.noise.spectrum.pdf', dpi=200)
+    
+    if np.any(log10_rho_swn):
+        paramidxs = [par.idx for par in log10_rho_swn]
+        plt.figure(figsize=(10, 4), dpi=100)
+        violins = plt.violinplot(chains[:, paramidxs[0]:paramidxs[-1]+1], showmedians=True, showmeans=False)
+        for patch in violins['bodies']:
+            patch.set_facecolor(f'crimson')
+            patch.set_edgecolor(f'red')
+            patch.set_alpha(0.4)
+        violins['cmedians'].set_color('k')
+        violins['cmedians'].set_alpha(0.4)
+        plt.grid(True, alpha=0.5, ls='dashed')
+        if showx:
+            plt.xticks(range(1, len(paramidxs)+1), [par.label for par in log10_rho_swn])
+        plt.xlabel(f'Spectral Bins', fontweight='bold', fontsize=10)
+        plt.ylabel(r'$\rho_{\rm SWN}$', fontweight='bold', fontsize=10)
+        plt.tight_layout()
+        plt.savefig(f'{outdir}/{psrname}.psrdisp.swn.noise.spectrum.pdf', dpi=200)
 
 def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psrname, t, dms, dmerrs, Tspan, 
                  Tref_dm, Tref_sw, toas, flags, timing_model, fref, plotchains, truthsfile, dispefacparams, 
@@ -912,7 +968,9 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psr
 
             chains, lnlike, lnpost = sampler.posterior(resample=True)
             logz, logzerr = sampler.evidence()
-            chainsarr = np.hstack(chains, np.vstack([lnlike, lnpost, logz, logzerr]).T)
+            chainsarr = np.hstack([chains, np.vstack([lnlike, lnpost, 
+                                                     logz*np.ones(lnlike.size), 
+                                                     logzerr*np.ones(lnlike.size)]).T])
         
         print(f'\nSaving the posterior chains in {chainfile}')
         np.save(chainfile, chainsarr)
@@ -947,21 +1005,29 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psr
         json.dump(median_dict, file)
     file.close()
         
-    print(f'\nPlotting the posteriors')
-    if truthsfile and os.path.isfile(truthsfile):
-        truths = np.array([float(f.split('\n')[0].split(' ')[-1]) for 
-                           f in open(truthsfile, 'r').readlines() if not f.startswith('#')])
+    print(f'\nPlotting the noise processes')
+    if psd == 'free-spectrum':
+        try: log10_rho_dmn = np.array([par for par in dmnparams if 'TNDMRHO' in par.name])
+        except Exception: log10_rho_dmn = None
+        try: log10_rho_swn = np.array([par for par in swnparams if 'TNSWRHO' in par.name])
+        except Exception: log10_rho_swn = None
+        plot_violins(log10_rho_dmn, log10_rho_swn, chains, outdir, psrname, showx=False)
+    
     else:
-        truths = None
-    fig = corner.corner(chains, labels=param_labels, 
-                        label_kwargs={"fontsize": 14, 'fontweight':'bold'}, 
-                        plot_datapoints=True, hist_kwargs={"density": True}, labelpad=0.05, 
-                        quantiles=(0.16, 0.5, 0.84), color='steelblue', show_titles=True, 
-                        title_kwargs={"fontsize": 12, 'fontweight':'bold'}, 
-                        truths=truths, truth_color='crimson')
-    plt.tight_layout()
-    plt.savefig(f'{outdir}/{psrname}.psrdisp.noise.pdf', dpi=200)
-
+        if truthsfile and os.path.isfile(truthsfile):
+            truths = np.array([float(f.split('\n')[0].split(' ')[-1]) for 
+                               f in open(truthsfile, 'r').readlines() if not f.startswith('#')])
+        else:
+            truths = None
+        fig = corner.corner(chains, labels=param_labels, 
+                            label_kwargs={"fontsize": 14, 'fontweight':'bold'}, 
+                            plot_datapoints=True, hist_kwargs={"density": True}, labelpad=0.05, 
+                            quantiles=(0.16, 0.5, 0.84), color='steelblue', show_titles=True, 
+                            title_kwargs={"fontsize": 12, 'fontweight':'bold'}, 
+                            truths=truths, truth_color='crimson')
+        plt.tight_layout()
+        plt.savefig(f'{outdir}/{psrname}.psrdisp.noise.pdf', dpi=200)
+    
     if plot_generated_realisations:
         print(f'\nPlotting {n_realisations} realisations of the process with {threshold} sigma threshold')
         plot_realisations(chains=chains, params=params, dms=dms, dmerrs=dmerrs, t=t, Tspan=Tspan, 
@@ -970,4 +1036,4 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psr
                           dispefacparams=dispefacparams, dispequadparams=dispequadparams, dmnparams=dmnparams, 
                           swnparams=swnparams, swdetparams=swdetparams, orders=orders, threshold=threshold, 
                           add_dms=add_dms, n_realisations=n_realisations, U=U, geometric_factor=geometric_factor, 
-                          save=True, no_title=True, vectorise=False)
+                          save=True, no_title=True, psd=psd, vectorise=False)
