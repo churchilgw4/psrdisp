@@ -83,6 +83,12 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
+    # Adding functionality for frozen powerlaw parameters by modifying the DispParam class attributes
+    # such that if pdist == frozen then the parameter will have a delta-function prior
+
+    # Creating a DispPTA object to store the structure of the basis depending on the PSD
+    # Current Phi matrix operation will be intensive due to the array-based basis structure extraction
+    
     if args.outdir:
         outdir = args.outdir
         try: 
@@ -99,14 +105,12 @@ if __name__ == '__main__':
         chaindir = outdir
         pass
 
-    # Generic for narrowband or wideband
     t, dms, dmerrs, flags = read_dmfile(args.dmfile, return_flags=True)
     Tspan = t[-1] - t[0]
 
     print(f'\nPulsar Name: {args.psrname}')
     plot_dmseries(t, dms, dmerrs, outdir, args.psrname)
 
-    # Creating the timing model and ToAs object from PINT
     psrmodel = get_model(parfile=args.parfile, allow_tcb=True, allow_T2=True)
 
     try: Tref_dm = psrmodel.DMEPOCH.value*u.day.to(u.s)
@@ -150,8 +154,13 @@ if __name__ == '__main__':
     params = get_DispParams(args.paramfile, flags)
     dispefacparams = np.array([param for param in params if param.is_white and 'EFAC' in param.name])
     dispequadparams = np.array([param for param in params if param.is_white and 'EQUAD' in param.name])
-    dmnparams = np.array([param for param in params if param.is_red and 'DM' in param.name])
-    swnparams = np.array([param for param in params if param.is_red and 'SW' in param.name])
+    if args.psd in ['powerlaw', 'free-spectrum', 'broken-powerlaw']:
+        print(f'\nPSD of the Fourier-domain noise processes: {args.psd}')
+        dmnparams = np.array([param for param in params if param.is_red and 'DM' in param.name])
+        swnparams = np.array([param for param in params if param.is_red and 'SW' in param.name])
+    else:
+        raise NotImplementedError(f'Currently only powerlaw, free-spectrum and broken powerlaw PSDs are supported')
+        
     swdetparams = [param for param in params if param.is_deterministic and 'NE_SW' in param.name]
     orders = np.array([int(param.name.split('NE_SW')[-1]) if param.name.split('NE_SW')[-1] else 0 
                        for param in swdetparams])
@@ -170,7 +179,7 @@ if __name__ == '__main__':
                  dmnparams=dmnparams, swnparams=swnparams, swdetparams=swdetparams, orders=orders, 
                  plot_generated_realisations=args.plot_realisations, threshold=args.threshold, 
                  add_dms=args.add_dms, n_realisations=args.n_realisations, 
-                 vectorise=args.vectorise, use_pool=args.pool)
+                 vectorise=args.vectorise, use_pool=args.pool, psd=args.psd)
     
     process_finish = time.time()
     print(f'\nThe process took {(process_finish-process_start)/60:.2f} minutes to finish')

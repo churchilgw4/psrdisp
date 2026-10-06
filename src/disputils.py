@@ -57,13 +57,41 @@ class DispParam:
             if 'DM' in self.name:
                 if 'AMP' in self.name:
                     self.label = r'$\log_{10}A_{\rm DMN}$'
-                else:
+                elif 'GAM' in self.name:
                     self.label = r'$\gamma_{\rm DMN}$'
+                elif 'RHO' in self.name:
+                    try:
+                        idx = int(self.name.split('TNDMRHO')[-1])
+                        self.label = rf'$\rho^{idx}$'+r'$_{\rm DMN}$'
+                    except Exception:
+                        self.label = r'$\rho_{\rm DMN}$'
+                elif 'DEL' in self.name:
+                    self.label = r'$\delta_{\rm DMN}$'
+                elif 'KAP' in self.name:
+                    self.label = r'$\kappa_{\rm DMN}$'
+                elif 'LFB' in self.name:
+                    self.label = r'$\log_{10}f_{\rm b}^{\rm DMN}$'
+                else:
+                    self.label = self.name
             elif 'SW' in self.name:
                 if 'AMP' in self.name:
                     self.label = r'$\log_{10}A_{\rm SWN}$'
-                else:
+                elif 'GAM' in self.name:
                     self.label = r'$\gamma_{\rm SWN}$'
+                elif 'RHO' in self.name:
+                    try:
+                        idx = int(self.name.split('TNSWRHO')[-1])
+                        self.label = rf'$\rho^{idx}$'+r'$_{\rm SWN}$'
+                    except Exception:
+                        self.label = r'$\rho_{\rm SWN}$'
+                elif 'DEL' in self.name:
+                    self.label = r'$\delta_{\rm SWN}$'
+                elif 'KAP' in self.name:
+                    self.label = r'$\kappa_{\rm SWN}$'
+                elif 'LFB' in self.name:
+                    self.label = r'$\log_{10}f_{\rm b}^{\rm SWN}$'
+                else:
+                    self.label = self.name
             else:
                 raise ValueError(f'Unrecognised parameter name: {self.name}')
 
@@ -215,16 +243,17 @@ def free_spectrum(log10_rho):
     '''
     return 10**(2*log10_rho)
 
-def broken_powerlaw(f, log10_A, gamma, delta, fb, kappa):
+def broken_powerlaw(f, log10_A, gamma, delta, log10_fb, kappa):
     '''
         Function to get the broken-powerlaw spectral density for a given basis
         InParams: array of linear Fourier-frequencies, power-law amplitude, pre-break spectral
-                  index (for f<f_b), post-break spectral index (for f>f_b), transition frequency in 1/s
-                  and smoothness of transition
+                  index (for f<f_b), post-break spectral index (for f>f_b), logarithm of the 
+                  transition frequency in 1/s and smoothness of transition
         Output: the Power Spectral Dnesity of a Fourier-dommain broken-powerlaw process
     '''
     yr = 1*u.year.to(u.s)
     fyr = 1/yr
+    fb = 10**log10_fb
     hcf = 10**(log10_A)*((f/fyr)**((3-gamma)/2))*(1+(f/fb)**(1/kappa))**(kappa*(gamma-delta)/2)
     pl = hcf**2/(12*np.pi**2*f**3)
     return pl
@@ -307,16 +336,17 @@ def get_Nmat(theta, dmerrs, dispefacparams, dispequadparams, vectorise=False):
             Nmat = np.array(dispefacs**2 * (dmerrs[None, :]**2 + 10**(2*dispequads)))
         return Nmat
 
-def get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd='powerlaw', vectorise=False):
+def get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, vectorise=False):
     '''
         Function to get the Gaussian Process kernel matrix for power-law processes
         InParams: parameter sample vector, time span in s, array of DM noise parameters, 
-                  array of SW noise parameters, DM noise harmonics, SW noise harmonics, PSD method 
-                  and flag to vectorise the likelihood computations
+                  array of SW noise parameters, DM noise harmonics, SW noise harmonics, the PSD of 
+                  Fourier-domain noise processes and flag to vectorise the likelihood computations
         Output: the GP kernel matrix for a PL spectrum with analytically marginalised DM Polynomial
     '''
     if dmnparams.size:
         f_dmn = get_freqs(Tspan, DMNharm)
+        
         if psd == 'powerlaw':
             try: log10_A_dmn = [par for par in dmnparams if par.name == 'TNDMAMP'][0]
             except Exception as e:
@@ -324,11 +354,39 @@ def get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd='powerl
             try: gamma_dmn = [par for par in dmnparams if par.name == 'TNDMGAM'][0]
             except Exception as e:
                 raise ValueError(f'Cannot extract DMN spectral index from parameter file')
+        
+        elif psd == 'free-spectrum':
+            try: log10_rho_dmn = np.array([par for par in dmnparams if par.name == 'TNDMRHO'])
+            except Exception as e:
+                raise ValueError(f'Cannot extract DMN amplitude from parameter file')
+            if not f_dmn.size == log10_rho_dmn.size:
+                raise ValueError(f'Number of free-spectrum components should match the number of harmonics')
+                
+        elif psd == 'broken-powerlaw':
+            try: log10_A_dmn = [par for par in dmnparams if par.name == 'TNDMAMP'][0]
+            except Exception as e:
+                raise ValueError(f'Cannot extract DMN amplitude from parameter file')
+            try: gamma_dmn = [par for par in dmnparams if par.name == 'TNDMGAM'][0]
+            except Exception as e:
+                raise ValueError(f'Cannot extract DMN pre-break spectral index from parameter file')
+            try: delta_dmn = [par for par in dmnparams if par.name == 'TNDMDEL'][0]
+            except Exception as e:
+                raise ValueError(f'Cannot extract DMN post-break spectral index from parameter file')
+            try: kappa_dmn = [par for par in dmnparams if par.name == 'TNDMKAP'][0]
+            except Exception as e:
+                raise ValueError(f'Cannot extract DMN smoothing index from parameter file')
+            try: log10_fb_dmn = [par for par in dmnparams if par.name == 'TNDMLFB'][0]
+            except Exception as e:
+                raise ValueError(f'Cannot extract DMN break-frequency from parameter file')
+        
+        else:
+            raise NotImplementedError(f'Currently only powerlaw, free-spectrum and broken powerlaw PSDs are supported')
     else:
         f_dmn = np.zeros(0)
 
     if swnparams.size:
         f_swn = get_freqs(Tspan, SWNharm)
+        
         if psd == 'powerlaw':
             try: log10_A_swn = [par for par in swnparams if par.name == 'TNSWAMP'][0]
             except Exception as e:
@@ -336,6 +394,32 @@ def get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd='powerl
             try: gamma_swn = [par for par in swnparams if par.name == 'TNSWGAM'][0]
             except Exception as e:
                 raise ValueError(f'Cannot extract SWN spectral index from parameter file')
+        
+        elif psd == 'free-spectrum':
+            try: log10_rho_swn = np.array([par for par in swnparams if par.name == 'TNSWRHO'])
+            except Exception as e:
+                raise ValueError(f'Cannot extract SWN amplitude from parameter file')
+            if not f_swn.size == log10_rho_swn.size:
+                raise ValueError(f'Number of free-spectrum components should match the number of harmonics')
+        
+        elif psd == 'broken-powerlaw':
+            try: log10_A_swn = [par for par in swnparams if par.name == 'TNSWAMP'][0]
+            except Exception as e:
+                raise ValueError(f'Cannot extract SWN amplitude from parameter file')
+            try: gamma_swn = [par for par in swnparams if par.name == 'TNSWGAM'][0]
+            except Exception as e:
+                raise ValueError(f'Cannot extract SWN pre-break spectral index from parameter file')
+            try: delta_swn = [par for par in swnparams if par.name == 'TNSWDEL'][0]
+            except Exception as e:
+                raise ValueError(f'Cannot extract SWN post-break spectral index from parameter file')
+            try: kappa_swn = [par for par in swnparams if par.name == 'TNSWKAP'][0]
+            except Exception as e:
+                raise ValueError(f'Cannot extract SWN smoothing index from parameter file')
+            try: log10_fb_swn = [par for par in swnparams if par.name == 'TNSWLFB'][0]
+            except Exception as e:
+                raise ValueError(f'Cannot extract SWN break-frequency from parameter file')
+        else:
+            raise NotImplementedError(f'Currently only powerlaw, free-spectrum and broken powerlaw PSDs are supported')
     else:
         f_swn = np.zeros(0)
 
@@ -345,14 +429,28 @@ def get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd='powerl
         if f_dmn.size:
             dmn = np.zeros(2*f_dmn.size)
             for i in range(f_dmn.size):
-                dmn[2*i] = dmn[2*i+1] = powerlaw(f_dmn[i], Tspan, log10_A=theta[log10_A_dmn.idx], 
-                                                 gamma=theta[gamma_dmn.idx])
+                if psd == 'powerlaw':
+                    dmn[2*i] = dmn[2*i+1] = powerlaw(f_dmn[i], Tspan, log10_A=theta[log10_A_dmn.idx], 
+                                                     gamma=theta[gamma_dmn.idx])
+                elif psd == 'free-spectrum':
+                    dmn[2*i] = dmn[2*i+1] = free_spectrum(log10_rho=theta[log10_rho_dmn[i].idx])
+                elif psd == 'broken-powerlaw':
+                    dmn[2*i] = dmn[2*i+1] = broken_powerlaw(f_dmn[i], log10_A=theta[log10_A_dmn.idx], 
+                                                            gamma=theta[gamma_dmn.idx], delta=theta[delta_dmn.idx], 
+                                                            log10_fb=theta[log10_fb_dmn.idx], kappa=theta[kappa_dmn.idx])
             Phi.extend(dmn)
         if f_swn.size:
             swn = np.zeros(2*f_swn.size)
             for i in range(f_swn.size):
-                swn[2*i] = swn[2*i+1] = powerlaw(f_swn[i], Tspan, log10_A=theta[log10_A_swn.idx], 
-                                                 gamma=theta[gamma_swn.idx])
+                if psd == 'powerlaw':
+                    swn[2*i] = swn[2*i+1] = powerlaw(f_swn[i], Tspan, log10_A=theta[log10_A_swn.idx], 
+                                                     gamma=theta[gamma_swn.idx])
+                elif psd == 'free-spectrum':
+                    swn[2*i] = swn[2*i+1] = free_spectrum(log10_rho=theta[log10_rho_swn[i].idx])
+                elif psd == 'broken-powerlaw':
+                    swn[2*i] = swn[2*i+1] = broken_powerlaw(f_swn[i], log10_A=theta[log10_A_swn.idx], 
+                                                            gamma=theta[gamma_swn.idx], delta=theta[delta_swn.idx], 
+                                                            log10_fb=theta[log10_fb_swn.idx], kappa=theta[kappa_swn.idx])
             Phi.extend(swn)
     else:
         Phi = [[] for walker in range(theta.shape[0])]
@@ -361,14 +459,28 @@ def get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd='powerl
             if f_dmn.size:
                 dmn = np.zeros(2*f_dmn.size)
                 for i in range(f_dmn.size):
-                    dmn[2*i] = dmn[2*i+1] = powerlaw(f_dmn[i], Tspan, log10_A=theta[walker, log10_A_dmn.idx], 
-                                                     gamma=theta[walker, gamma_dmn.idx])
+                    if psd == 'powerlaw':
+                        dmn[2*i] = dmn[2*i+1] = powerlaw(f_dmn[i], Tspan, log10_A=theta[log10_A_dmn.idx], 
+                                                         gamma=theta[gamma_dmn.idx])
+                    elif psd == 'free-spectrum':
+                        dmn[2*i] = dmn[2*i+1] = free_spectrum(log10_rho=theta[log10_rho_dmn[i].idx])
+                    elif psd == 'broken-powerlaw':
+                        dmn[2*i] = dmn[2*i+1] = broken_powerlaw(f_dmn[i], log10_A=theta[log10_A_dmn.idx], 
+                                                                gamma=theta[gamma_dmn.idx], delta=theta[delta_dmn.idx], 
+                                                                log10_fb=theta[log10_fb_dmn.idx], kappa=theta[kappa_dmn.idx])
                 Phi[walker].extend(dmn)
             if f_swn.size:
                 swn = np.zeros(2*f_swn.size)
                 for i in range(f_swn.size):
-                    swn[2*i] = swn[2*i+1] = powerlaw(f_swn[i], Tspan, log10_A=theta[walker, log10_A_swn.idx], 
-                                                     gamma=theta[walker, gamma_swn.idx])
+                    if psd == 'powerlaw':
+                        swn[2*i] = swn[2*i+1] = powerlaw(f_swn[i], Tspan, log10_A=theta[log10_A_swn.idx], 
+                                                         gamma=theta[gamma_swn.idx])
+                    elif psd == 'free-spectrum':
+                        swn[2*i] = swn[2*i+1] = free_spectrum(log10_rho=theta[log10_rho_swn[i].idx])
+                    elif psd == 'broken-powerlaw':
+                        swn[2*i] = swn[2*i+1] = broken_powerlaw(f_swn[i], log10_A=theta[log10_A_swn.idx], 
+                                                                gamma=theta[gamma_swn.idx], delta=theta[delta_swn.idx], 
+                                                                log10_fb=theta[log10_fb_swn.idx], kappa=theta[kappa_swn.idx])
                 Phi[walker].extend(swn)
     
     return np.array(Phi)
@@ -497,7 +609,7 @@ def get_lnprior(theta, params, vectorise=False):
 
 def get_lnpost(theta, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, 
                timing_model, DMNharm, SWNharm, fref, dispefacparams, dispequadparams, 
-               dmnparams, swnparams, swdetparams, orders, U, geometric_factor, vectorise):
+               dmnparams, swnparams, swdetparams, orders, U, geometric_factor, psd, vectorise):
     '''
         Function to get the log-posterior for different paramters
         InParams: parameter sample vector, list of DispParam parameters, DMs in pc/cm^3, DM errors in pc/cm^3, 
@@ -506,7 +618,8 @@ def get_lnpost(theta, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, fla
                   SWN harmonics, the chromatic reference frequency in MHz, array of DISPEFAC parameters, 
                   array of DISPEQUAD parameters, array pf DM noise parameters, array of SW noise parameters, 
                   array of deterministic SW parameters, array of their orders, noise basis matrix
-                  SW geometric factor (PINT) and flag to vectorise the likelihood computations
+                  SW geometric factor (PINT), the PSD of Fourier-domain noise processes and 
+                  flag to vectorise the likelihood computations
         Output: the log-posterior value as per the parameter samples
     '''
     lnprior = get_lnprior(theta, params, vectorise)
@@ -517,11 +630,11 @@ def get_lnpost(theta, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, fla
         return lnprior + get_lnlike_optimised(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, 
                                               timing_model, DMNharm, SWNharm, fref, dispefacparams, 
                                               dispequadparams, dmnparams, swnparams, swdetparams, orders, U, 
-                                              geometric_factor, vectorise=vectorise)
+                                              geometric_factor, psd, vectorise=vectorise)
 
 def get_lnlike_optimised(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, 
                          timing_model, DMNharm, SWNharm, fref, dispefacparams, dispequadparams, 
-                         dmnparams, swnparams, swdetparams, orders, U, geometric_factor, vectorise):
+                         dmnparams, swnparams, swdetparams, orders, U, geometric_factor, psd, vectorise):
     '''
         Function to get the log-likelihood in an optimised form for all the sampled parameters
         InParams: parameter sample vector, list of DispParam parameters, DMs in pc/cm^3, DM errors in pc/cm^3, 
@@ -530,7 +643,8 @@ def get_lnlike_optimised(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, f
                   SWN harmonics, the chromatic reference frequency in MHz, array of DISPEFAC parameters, 
                   array of DISPEQUAD parameters, array pf DM noise parameters, array of SW noise parameters, 
                   array of deterministic SW parameters, array of their orders, noise basis matrix, 
-                  SW geometric factor (PINT) and flag to vectorise the likelihood computations
+                  SW geometric factor (PINT), the PSD of Fourier-domain noise processes and 
+                  flag to vectorise the likelihood computations
         Output: the log-likelihood value as per the parameters
     '''
     # Useful in case the sampler gets stuck
@@ -540,7 +654,7 @@ def get_lnlike_optimised(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, f
             return _cache[key]
     
     N = get_Nmat(theta, dmerrs, dispefacparams, dispequadparams, vectorise=vectorise)
-    Phi = get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, vectorise=vectorise)
+    Phi = get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, vectorise=vectorise)
     swdet = get_swdetsignal(t, Tref_sw, theta, swdetparams, orders, timing_model, geometric_factor, 
                             vectorise=vectorise)
     y = dms - swdet
@@ -595,7 +709,7 @@ def get_lnlike_optimised(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, f
 
 def get_realisation(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, 
                     timing_model, DMNharm, SWNharm, fref, dispefacparams, dispequadparams, 
-                    dmnparams, swnparams, swdetparams, orders, U, geometric_factor, vectorise=False):
+                    dmnparams, swnparams, swdetparams, orders, U, geometric_factor, psd, vectorise=False):
     '''
         Function to get a random time-domain realisation of stochastic noise processes
         InParams: parameter sample vector, list of DispParam parameters, DMs in pc/cm^3, DM errors in pc/cm^3, 
@@ -604,11 +718,12 @@ def get_realisation(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags,
                   the chromatic reference frequency in MHz, array of DISPEFAC parameters, 
                   array of DISPEQUAD parameters, array pf DM noise parameters, array of SW noise parameters, 
                   array of deterministic SW parameters, array of their orders, noise basis matrix, 
-                  SW geometric factor (PINT) and flag to vectorise the likelihood computations
+                  SW geometric factor (PINT), the PSD of Fourier-domain noise processes and 
+                  flag to vectorise the likelihood computations
         Output: an array of a random time-domain realisation of the stochastic processes
     '''
     N = get_Nmat(theta, dmerrs, dispefacparams, dispequadparams, vectorise=vectorise)
-    Phi = get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, vectorise=vectorise)
+    Phi = get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, vectorise=vectorise)
     swdet = get_swdetsignal(t, Tref_sw, theta, swdetparams, orders, timing_model, geometric_factor, 
                             vectorise=vectorise)
     y = dms - swdet
@@ -716,7 +831,7 @@ def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw,
 def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psrname, t, dms, dmerrs, Tspan, 
                  Tref_dm, Tref_sw, toas, flags, timing_model, fref, plotchains, truthsfile, dispefacparams, 
                  dispequadparams, dmnparams, swnparams, swdetparams, orders, plot_generated_realisations, 
-                 threshold, add_dms, n_realisations, vectorise, use_pool):
+                 threshold, add_dms, n_realisations, vectorise, use_pool, psd):
     '''
         Function to sample the posteriors of dispersive noise processes
         InParams: Sampler name, list of DispParam parameters, Number of emcee samples per walker, 
@@ -729,7 +844,8 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psr
                   array of their orders, flag to plot the generated realisations of the extracted processes, 
                   threshold for calculating the randomness in generated realisations, 
                   flag to add DM time series to the realisations, number of realisations to be generated, 
-                  flag to vectorise the likelihood evaluations and flag to use multiprocessing pool
+                  flag to vectorise the likelihood evaluations, flag to use multiprocessing pool and the PSD
+                  of the Fourier-domain noise processes
         Output: None
     '''
     Ndim = len(params)
@@ -740,10 +856,10 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psr
     U = get_Umat(t, Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, geometric_factor, DMNharm, SWNharm, fref)
     args = (params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, timing_model, 
             DMNharm, SWNharm, fref, dispefacparams, dispequadparams, dmnparams, swnparams, 
-            swdetparams, orders, U, geometric_factor, vectorise)
+            swdetparams, orders, U, geometric_factor, psd, vectorise)
     if os.path.isfile(chainfile):
         print(f'\nUsing the existing chains from {chainfile}')
-        chains = np.load(chainfile)
+        chains = np.load(chainfile)[:, :-4]
     else:
         print(f'\nUsing the {name} sampler to sample the parameter posteriors')
         if name == 'emcee':
@@ -766,6 +882,7 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psr
                 sampler.run_mcmc(p0, Nsamples, progress=True, store=True)
                 
             chains = sampler.get_chain(flat=True, discard=Nburn, thin=Nthin)
+            chainsarr = chains
         
         elif name == 'pocomc':
             Nburn = 0
@@ -794,9 +911,11 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psr
                 sampler.run(save_every=None, n_total=2048, n_evidence=2048)
 
             chains, lnlike, lnpost = sampler.posterior(resample=True)
+            logz, logzerr = sampler.evidence()
+            chainsarr = np.hstack(chains, np.vstack([lnlike, lnpost, logz, logzerr]).T)
         
         print(f'\nSaving the posterior chains in {chainfile}')
-        np.save(chainfile, chains)
+        np.save(chainfile, chainsarr)
 
     if plotchains:
         try:
