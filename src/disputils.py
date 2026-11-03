@@ -173,7 +173,7 @@ def read_dmfile(dmfile, return_flags=False):
             sizearr = np.array([len(f.split('\n')[0].split(' ')) 
                                 for f in filelines])
             
-            maskarr = np.array([size == 4 for size in sizearr])
+            maskarr = np.array([size == np.max(sizearr) for size in sizearr])
 
             if not np.any(maskarr == True):
                 flags = np.array(['no-flag' for item in range(t.size)])

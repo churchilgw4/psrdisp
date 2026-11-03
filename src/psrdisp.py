@@ -120,8 +120,8 @@ if __name__ == '__main__':
         sys.exit()
 
     try: Tref_sw = psrmodel.SWEPOCH.value*u.day.to(u.s)
-    except AttributeError:
-        print(f'\nThe SWEPOCH is not present in the timing model')
+    except Exception:
+        print(f'\nThe SWEPOCH cannot be extracted from the timing model')
         print(f'\nSetting the SWEPOCH to be same as the DMEPOCH for {args.psrname}')
         Tref_sw = Tref_dm
 
