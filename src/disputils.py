@@ -226,7 +226,7 @@ def get_freqs(Tspan, Nharm=None):
 def powerlaw(f, Tspan, log10_A, gamma):
     '''
         Function to get the Fourier-domain power-law for a given basis
-        InParams: array of linear Fourier-frequencies, Time span in seconds, 
+        InParams: array of linear Fourier-frequencies, time span in seconds, 
                   power-law amplitude and spectral index
         Output: the Power Spectral Density of a Fourier-domain free-spectral process
     '''
@@ -235,27 +235,28 @@ def powerlaw(f, Tspan, log10_A, gamma):
     pl = ((10**log10_A)**2/(12*np.pi**2*Tspan))*f**(-gamma)*fyr**(gamma-3)
     return pl
 
-def free_spectrum(log10_rho):
+def free_spectrum(log10_rho, Tspan):
     '''
         Function to get the free-spectrum density for a given basis
-        InParams: time span in s and free spectrum components
+        InParams: free spectrum component and time span in seconds
         Output: the Power Spectral Density of a free-spectrum process
     '''
-    return 10**(2*log10_rho)
+    return 10**(2*log10_rho)/Tspan
 
-def broken_powerlaw(f, log10_A, gamma, delta, log10_fb, kappa):
+def broken_powerlaw(f, log10_A, gamma, delta, log10_fb, kappa, Tspan):
     '''
         Function to get the broken-powerlaw spectral density for a given basis
         InParams: array of linear Fourier-frequencies, power-law amplitude, pre-break spectral
                   index (for f<f_b), post-break spectral index (for f>f_b), logarithm of the 
-                  transition frequency in 1/s and smoothness of transition
+                  transition frequency in 1/s, parameter for smoothness of transition and 
+                  time span in seconds
         Output: the Power Spectral Dnesity of a Fourier-dommain broken-powerlaw process
     '''
     yr = 1*u.year.to(u.s)
     fyr = 1/yr
     fb = 10**log10_fb
     hcf = 10**(log10_A)*((f/fyr)**((3-gamma)/2))*(1+(f/fb)**(1/kappa))**(kappa*(gamma-delta)/2)
-    pl = hcf**2/(12*np.pi**2*f**3)
+    pl = hcf**2/(12*np.pi**2*f**3*Tspan)
     return pl
 
 def get_Umat(t, Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, geometric_factor, DMNharm, SWNharm, fref):
@@ -434,14 +435,16 @@ def get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, vector
                                                      log10_A=theta[log10_A_dmn.idx], 
                                                      gamma=theta[gamma_dmn.idx])
                 elif psd == 'free-spectrum':
-                    dmn[2*i] = dmn[2*i+1] = free_spectrum(log10_rho=theta[log10_rho_dmn[i].idx])
+                    dmn[2*i] = dmn[2*i+1] = free_spectrum(log10_rho=theta[log10_rho_dmn[i].idx], 
+                                                          Tspan=Tspan)
                 elif psd == 'broken-powerlaw':
                     dmn[2*i] = dmn[2*i+1] = broken_powerlaw(f_dmn[i], 
                                                             log10_A=theta[log10_A_dmn.idx], 
                                                             gamma=theta[gamma_dmn.idx], 
                                                             delta=theta[delta_dmn.idx], 
                                                             log10_fb=theta[log10_fb_dmn.idx], 
-                                                            kappa=theta[kappa_dmn.idx])
+                                                            kappa=theta[kappa_dmn.idx], 
+                                                            Tspan=Tspan)
             Phi.extend(dmn)
         if f_swn.size:
             swn = np.zeros(2*f_swn.size)
@@ -451,14 +454,16 @@ def get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, vector
                                                      log10_A=theta[log10_A_swn.idx], 
                                                      gamma=theta[gamma_swn.idx])
                 elif psd == 'free-spectrum':
-                    swn[2*i] = swn[2*i+1] = free_spectrum(log10_rho=theta[log10_rho_swn[i].idx])
+                    swn[2*i] = swn[2*i+1] = free_spectrum(log10_rho=theta[log10_rho_swn[i].idx], 
+                                                          Tspan=Tspan)
                 elif psd == 'broken-powerlaw':
                     swn[2*i] = swn[2*i+1] = broken_powerlaw(f_swn[i], 
                                                             log10_A=theta[log10_A_swn.idx], 
                                                             gamma=theta[gamma_swn.idx], 
                                                             delta=theta[delta_swn.idx], 
                                                             log10_fb=theta[log10_fb_swn.idx], 
-                                                            kappa=theta[kappa_swn.idx])
+                                                            kappa=theta[kappa_swn.idx], 
+                                                            Tspan=Tspan)
             Phi.extend(swn)
     else:
         Phi = [[] for walker in range(theta.shape[0])]
@@ -472,14 +477,16 @@ def get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, vector
                                                          log10_A=theta[walker, log10_A_dmn.idx], 
                                                          gamma=theta[walker, gamma_dmn.idx])
                     elif psd == 'free-spectrum':
-                        dmn[2*i] = dmn[2*i+1] = free_spectrum(log10_rho=theta[walker, log10_rho_dmn[i].idx])
+                        dmn[2*i] = dmn[2*i+1] = free_spectrum(log10_rho=theta[walker, log10_rho_dmn[i].idx], 
+                                                              Tspan=Tspan)
                     elif psd == 'broken-powerlaw':
                         dmn[2*i] = dmn[2*i+1] = broken_powerlaw(f_dmn[i], 
                                                                 log10_A=theta[walker, log10_A_dmn.idx], 
                                                                 gamma=theta[walker, gamma_dmn.idx], 
                                                                 delta=theta[walker, delta_dmn.idx], 
                                                                 log10_fb=theta[walker, log10_fb_dmn.idx], 
-                                                                kappa=theta[walker, kappa_dmn.idx])
+                                                                kappa=theta[walker, kappa_dmn.idx], 
+                                                                Tspan=Tspan)
                 Phi[walker].extend(dmn)
             if f_swn.size:
                 swn = np.zeros(2*f_swn.size)
@@ -489,13 +496,15 @@ def get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, vector
                                                          log10_A=theta[walker, log10_A_swn.idx], 
                                                          gamma=theta[walker, gamma_swn.idx])
                     elif psd == 'free-spectrum':
-                        swn[2*i] = swn[2*i+1] = free_spectrum(log10_rho=theta[walker, log10_rho_swn[i].idx])
+                        swn[2*i] = swn[2*i+1] = free_spectrum(log10_rho=theta[walker, log10_rho_swn[i].idx], 
+                                                              Tspan=Tspan)
                     elif psd == 'broken-powerlaw':
                         swn[2*i] = swn[2*i+1] = broken_powerlaw(f_swn[i], log10_A=theta[walker, log10_A_swn.idx], 
                                                                 gamma=theta[walker, gamma_swn.idx], 
                                                                 delta=theta[walker, delta_swn.idx], 
                                                                 log10_fb=theta[walker, log10_fb_swn.idx], 
-                                                                kappa=theta[walker, kappa_swn.idx])
+                                                                kappa=theta[walker, kappa_swn.idx], 
+                                                                Tspan=Tspan)
                 Phi[walker].extend(swn)
     
     return np.array(Phi)
@@ -853,11 +862,16 @@ def plot_violins(log10_rho_dmn, log10_rho_swn, chains, outdir, psrname, showx=Fa
         plt.figure(figsize=(10, 4), dpi=100)
         violins = plt.violinplot(chains[:, paramidxs[0]:paramidxs[-1]+1], showmedians=True, showmeans=False)
         for patch in violins['bodies']:
-            patch.set_facecolor(f'crimson')
-            patch.set_edgecolor(f'red')
-            patch.set_alpha(0.4)
+            patch.set_facecolor('crimson')
+            patch.set_edgecolor('k')
+            patch.set_alpha(0.3)
         violins['cmedians'].set_color('k')
-        violins['cmedians'].set_alpha(0.4)
+        violins['cbars'].set_color('k')
+        violins['cbars'].set_alpha(0.4)
+        violins['cmaxes'].set_color('k')
+        violins['cmaxes'].set_alpha(0.4)
+        violins['cmins'].set_color('k')
+        violins['cmins'].set_alpha(0.4)
         plt.grid(True, alpha=0.5, ls='dashed')
         if showx:
             plt.xticks(range(1, len(paramidxs)+1), [par.label for par in log10_rho_dmn])
@@ -873,9 +887,14 @@ def plot_violins(log10_rho_dmn, log10_rho_swn, chains, outdir, psrname, showx=Fa
         for patch in violins['bodies']:
             patch.set_facecolor(f'crimson')
             patch.set_edgecolor(f'red')
-            patch.set_alpha(0.4)
+            patch.set_alpha(0.3)
         violins['cmedians'].set_color('k')
-        violins['cmedians'].set_alpha(0.4)
+        violins['cbars'].set_color('k')
+        violins['cbars'].set_alpha(0.4)
+        violins['cmaxes'].set_color('k')
+        violins['cmaxes'].set_alpha(0.4)
+        violins['cmins'].set_color('k')
+        violins['cmins'].set_alpha(0.4)
         plt.grid(True, alpha=0.5, ls='dashed')
         if showx:
             plt.xticks(range(1, len(paramidxs)+1), [par.label for par in log10_rho_swn])
@@ -905,7 +924,7 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psr
         Output: None
     '''
     Ndim = len(params)
-    chainfile = f'{chaindir}/{psrname}.psrdisp.chains.npy'
+    chainfile = f'{chaindir}/{psrname}.psrdisp.{name}.chains.npy'
     param_names = [param.name for param in params]
     param_labels = [param.label for param in params]
     geometric_factor = get_sw_geometry(timing_model, toas)
@@ -913,9 +932,13 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psr
     args = (params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, timing_model, 
             DMNharm, SWNharm, fref, dispefacparams, dispequadparams, dmnparams, swnparams, 
             swdetparams, orders, U, geometric_factor, psd, vectorise)
+    
     if os.path.isfile(chainfile):
         print(f'\nUsing the existing chains from {chainfile}')
-        chains = np.load(chainfile)[:, :-4]
+        if name == 'emcee':
+            chains = np.load(chainfile)
+        elif name == 'pocomc':
+            chains = np.load(chainfile)[:, :-4]
     else:
         print(f'\nUsing the {name} sampler to sample the parameter posteriors')
         if name == 'emcee':
@@ -1012,6 +1035,16 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psr
         try: log10_rho_swn = np.array([par for par in swnparams if 'TNSWRHO' in par.name])
         except Exception: log10_rho_swn = None
         plot_violins(log10_rho_dmn, log10_rho_swn, chains, outdir, psrname, showx=False)
+        restpars = [par for par in params if not par in dmnparams and not par in swnparams]
+        restchains = np.vstack([chains[:, par.idx] for par in restpars]).T
+        fig = corner.corner(restchains, labels=[par.label for par in restpars], 
+                            label_kwargs={"fontsize": 14, 'fontweight':'bold'}, 
+                            plot_datapoints=True, hist_kwargs={"density": True}, labelpad=0.05, 
+                            quantiles=(0.16, 0.5, 0.84), color='steelblue', show_titles=True, 
+                            title_kwargs={"fontsize": 12, 'fontweight':'bold'}, 
+                            truths=None, truth_color='crimson')
+        plt.tight_layout()
+        plt.savefig(f'{outdir}/{psrname}.psrdisp.noise.pdf', dpi=200)
     
     else:
         if truthsfile and os.path.isfile(truthsfile):
