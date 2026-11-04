@@ -755,12 +755,30 @@ def get_realisation(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags,
     Ninv_U = U / N[:, None]
     UT_Ninv_y = y @ Ninv_U
     Sigmainv = np.diag(Phi) + U.T @ Ninv_U
-    Sigmainv_cf = sl.cholesky(Sigmainv, lower=False)
-    a_hat = sl.cho_solve((Sigmainv_cf, False), UT_Ninv_y)
-    z = np.random.randn(len(a_hat))
-    a = a_hat + sl.solve_triangular(Sigmainv_cf, z, lower=False)
-    realisation = U @ a
+    try:
+        Sigmainv_cf = sl.cholesky(Sigmainv, lower=False)
+        a_hat = sl.cho_solve((Sigmainv_cf, False), UT_Ninv_y)
+        z = np.random.randn(len(a_hat))
+        a_delta = sl.solve_triangular(Sigmainv_cf, z, lower=False)
     
+    except np.linalg.LinAlgError:
+        Sigmainv = (Sigmainv + Sigmainv.T) / 2
+        regularisation_factor = np.array(1e-12, dtype=np.float128) * np.diag(Sigmainv).mean()
+        Sigmainv_stable = Sigmainv + np.eye(Sigmainv.shape[0], dtype=np.float128) * regularisation_factor
+        Sigmainv_cf = sl.cholesky(Sigmainv_stable, lower=False)
+        a_hat = sl.cho_solve((Sigmainv_cf, False), UT_Ninv_y)
+        z = np.random.randn(len(a_hat))
+        a_delta = sl.solve_triangular(Sigmainv_cf, z, lower=False)
+
+    finally:
+        Sigmainv_pinv = sl.pinv(Sigmainv)
+        a_hat = Sigmainv_pinv @ UT_Ninv_y
+        z = np.random.randn(len(a_hat))
+        U_svd, s_svd, Vt_svd = sl.svd(Sigmainv)
+        a_delta = (U_svd / np.sqrt(s_svd)) @ z
+
+    a = a_hat + a_delta
+    realisation = U @ a
     return realisation
 
 def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, 
