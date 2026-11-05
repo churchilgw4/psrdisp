@@ -85,6 +85,10 @@ if __name__ == '__main__':
 
     # Adding functionality for frozen powerlaw parameters by modifying the DispParam class attributes
     # such that if pdist == frozen then the parameter will have a delta-function prior
+    # Adding a better functionality in the parameter file to deal with free-spectrum process
+
+    # Adding functionality to fit for the DM polynomial terms instead of analytical marginalisation
+    # Adding functionality to fit for DMJUMPs with or without analytical marginalisation
 
     # Creating a DispPTA object to store the structure of the basis depending on the PSD
     # Current Phi matrix operation will be intensive due to the array-based basis structure extraction

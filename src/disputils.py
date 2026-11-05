@@ -70,7 +70,7 @@ class DispParam:
                 elif 'KAP' in self.name:
                     self.label = r'$\kappa_{\rm DMN}$'
                 elif 'LFB' in self.name:
-                    self.label = r'$\log_{10}f_{\rm b}^{\rm DMN}$'
+                    self.label = r'$\log_{10}f_{\rm b, \rm DMN}$'
                 else:
                     self.label = self.name
             elif 'SW' in self.name:
@@ -89,7 +89,7 @@ class DispParam:
                 elif 'KAP' in self.name:
                     self.label = r'$\kappa_{\rm SWN}$'
                 elif 'LFB' in self.name:
-                    self.label = r'$\log_{10}f_{\rm b}^{\rm SWN}$'
+                    self.label = r'$\log_{10}f_{\rm b, \rm SWN}$'
                 else:
                     self.label = self.name
             else:
