@@ -12,7 +12,7 @@ def test_DispParams():
     pflag = 'test-flag'
     param = DispParam(pidx, name=pname, min=pmin, max=pmax, dist=pdist, flag=pflag)
     
-    assert param.pidx == pidx, f'Invalid parameter index {param.pidx}'
+    assert param.idx == pidx, f'Invalid parameter index {param.pidx}'
     assert param.name == pname, f'Invalid parameter name {param.name}'
     assert param.min == pmin, f'Invalid parameter minimum value {param.min}'
     assert param.max == pmax, f'Invalid parameter maximum value {param.max}'
