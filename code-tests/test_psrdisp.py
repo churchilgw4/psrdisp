@@ -25,11 +25,7 @@ def test_DispParams():
 def test_get_DispParams():
     paramfile = get_paramfile()
     params = get_DispParams(paramfile=paramfile, flags=True)
-    
-
-
-
-
-
-
-
+    assert len([par for par in params if par.is_white]) == 1
+    assert len([par for par in params if par.is_red]) == 2
+    assert len([par for par in params if par.is_deterministic]) == 3
+        
