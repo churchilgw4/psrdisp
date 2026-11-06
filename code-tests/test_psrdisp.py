@@ -37,6 +37,7 @@ def test_DispParams():
     assert param.max == pmax, f'Invalid parameter maximum value {param.max}'
     assert param.dist == pdist, f'Invalid parameter distribution {param.dist}'
     assert param.flag == pflag, f'Invalid parameter flag {param.flag}'
+    assert param.mask == pmask, f'Invalid parameter mask'
     assert param.is_white == False, f'Invalid parameter classification'
     assert param.is_red == False, f'Invalid parameter classification'
     assert param.is_deterministic == True, f'Invalid parameter classification'
