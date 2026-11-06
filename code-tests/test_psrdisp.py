@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+import os
 from disputils import *
 
 parfile = f'./utils/parfile.par'
