@@ -22,8 +22,8 @@ In order to distribute the sampling load across multiple processors in parallel,
 The default setting is to use all the available processors to sample the likelihood for optimal performance.
 With the `pocomc` sampler, if the process is being executed on an MPI-enabled cluster, it will utilise the full parallelisation possible based on the given configuration in the job submission script.
 
-In order to run the vectorised implementation of likelihood, use the `--vectorise` option. 
-This gives a significant boost in computation time when using the `pocomc` sampler.
+In order to run the vectorised implementation of likelihood, use the `--vectorise` option. This gives a significant boost in computation time when using the `pocomc` sampler.
+In order to run SPNA on a given DM time series without a tim file, use the `--narrowband` option.
 
 ## Citation
 ```
@@ -56,5 +56,4 @@ SCIPY
 EMCEE
 CORNER
 POCOMC
-
 ```
