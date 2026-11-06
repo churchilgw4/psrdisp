@@ -15,14 +15,11 @@ dependencies = [
 	"pint-pulsar", 
 	"matplotlib", 
 	"astropy", 
-	"scipy", 
-	"multiprocessing", 
+	"scipy",  
 	"emcee", 
 	"pocomc", 
 	"numpy",
-	"corner", 
-	"math",
-	"json"
+	"corner"
 ]
 
 classifiers = [
