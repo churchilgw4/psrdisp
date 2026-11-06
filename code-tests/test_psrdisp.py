@@ -3,19 +3,21 @@ import pytest
 import os
 from disputils import *
 
-parfile = f'./utils/parfile.par'
+basedir = os.path.dirname(os.path.abspath(__file__))
+
+parfile = os.path.join(basedir, f'utils', f'parfile.par')
 assert os.path.isfile(parfile), f'The par file {parfile} does not exist'
 
-timfile = f'./utils/timfile.tim'
+timfile = os.path.join(basedir, f'utils', f'timfile.tim')
 assert os.path.isfile(timfile), f'The tim file {timfile} does not exist'
 
-paramfile = f'./utils/paramfile.txt'
+paramfile = os.path.join(basedir, f'utils', f'paramfile.txt')
 assert os.path.isfile(paramfile), f'The parameter file {paramfile} does not exist'
 
-truthsfile = f'./utils/truthsfile.txt'
+truthsfile = os.path.join(basedir, f'utils', f'truthsfile.txt')
 assert os.path.isfile(truthsfile), f'The truths file {truthsfile} does not exist'
 
-dmfile = f'./utils/dmfile.txt'
+dmfile = os.path.join(basedir, f'utils', f'dmfile.txt')
 assert os.path.isfile(dmfile), f'The DM time series file {dmfile} does not exist'
 
 def test_DispParams():
