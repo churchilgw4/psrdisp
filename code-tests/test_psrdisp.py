@@ -1,16 +1,29 @@
 import numpy as np
 import pytest
-from validation_utils import *
 from disputils import *
+
+parfile = f'./utils/parfile.par'
+assert os.path.isfile(parfile), f'The par file {parfile} does not exist'
+
+timfile = f'./utils/timfile.tim'
+assert os.path.isfile(timfile), f'The tim file {timfile} does not exist'
+
+paramfile = f'./utils/paramfile.txt'
+assert os.path.isfile(paramfile), f'The parameter file {paramfile} does not exist'
+
+truthsfile = f'./utils/truthsfile.txt'
+assert os.path.isfile(truthsfile), f'The truths file {truthsfile} does not exist'
+
+dmfile = f'./utils/dmfile.txt'
+assert os.path.isfile(dmfile), f'The DM time series file {dmfile} does not exist'
 
 def test_DispParams():
     pidx = 0
-    pname = 'test-param'
+    pname = f'test-param'
     pmin = 0
     pmax = 10
-    pdist = 'uniform'
-    pflag = 'test-flag'
-    dmfile = get_dmfile()
+    pdist = f'uniform'
+    pflag = f'test-flag'
     t, dms, dmerrs, flags = read_dmfile(dmfile=dmfile, return_flags=True)
     pmask = flags == pflag
     
@@ -26,7 +39,6 @@ def test_DispParams():
     assert param.is_deterministic == True, f'Invalid parameter classification'
     assert t.size == dms.size == dmerrs.size == flags.size, f'Invalid array sizes'
 
-    paramfile = get_paramfile()
     params = get_DispParams(paramfile=paramfile, flags=flags)
     assert len([par for par in params if par.is_white]) == 1
     assert len([par for par in params if par.is_red]) == 2
