@@ -107,13 +107,12 @@ class DispParam:
         print(f'\t - Is white noise parameter: {self.is_white}')
         print(f'\t - Is deterministic parameter: {self.is_deterministic}')
 
-    def set_values(self, median=None, sigma=None, map=None):
+    def set_values(self, **kwargs):
         '''
             Function to set the median and standard deviation of parameters
         '''
-        self.median = median
-        self.sigma = sigma
-        self.map = map
+        for key, value in kwargs.items():
+            setattr(self, key, value)
 
 def get_DispParams(paramfile, flags):
     '''
@@ -760,17 +759,8 @@ def get_realisation(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags,
         a_hat = sl.cho_solve((Sigmainv_cf, False), UT_Ninv_y)
         z = np.random.randn(len(a_hat))
         a_delta = sl.solve_triangular(Sigmainv_cf, z, lower=False)
-    
-    except np.linalg.LinAlgError:
-        Sigmainv = (Sigmainv + Sigmainv.T) / 2
-        regularisation_factor = np.array(1e-12, dtype=np.float128) * np.diag(Sigmainv).mean()
-        Sigmainv_stable = Sigmainv + np.eye(Sigmainv.shape[0], dtype=np.float128) * regularisation_factor
-        Sigmainv_cf = sl.cholesky(Sigmainv_stable, lower=False)
-        a_hat = sl.cho_solve((Sigmainv_cf, False), UT_Ninv_y)
-        z = np.random.randn(len(a_hat))
-        a_delta = sl.solve_triangular(Sigmainv_cf, z, lower=False)
-
-    finally:
+        
+    except Exception:
         Sigmainv_pinv = sl.pinv(Sigmainv)
         a_hat = Sigmainv_pinv @ UT_Ninv_y
         z = np.random.randn(len(a_hat))
@@ -806,12 +796,11 @@ def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw,
     for param in params:
         median = np.median(chains[:, param.idx])
         sigma = np.std(chains[:, param.idx])
-        map = np.max(chains[:, param.idx])
-        param.set_values(median=median, sigma=sigma, map=map)
+        param.set_values(median=median, sigma=sigma)
         print(f'\n{param.name}:')
         print(f' - Median value = {param.median:.4f}')
         print(f' - Standard Deviation = {param.sigma:.4f}')
-        print(f' - Maximum a-posteriori value = {param.map:.4f}')
+        print(f' - Maximum a-posteriori value = {chains[param.mapidx, param.idx]:.4f}')
         dist = np.random.normal(loc=median, scale=threshold*np.abs(sigma), size=n_realisations)
         param_choices[:, param.idx] = np.random.choice(dist, size=n_realisations)
 
@@ -954,7 +943,7 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psr
     if os.path.isfile(chainfile):
         print(f'\nUsing the existing chains from {chainfile}')
         if name == 'emcee':
-            chains = np.load(chainfile)
+            chains = np.load(chainfile)[:, :-1]
         elif name == 'pocomc':
             chains = np.load(chainfile)[:, :-4]
     else:
@@ -979,7 +968,11 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psr
                 sampler.run_mcmc(p0, Nsamples, progress=True, store=True)
                 
             chains = sampler.get_chain(flat=True, discard=Nburn, thin=Nthin)
-            chainsarr = chains
+            log_probs = sampler.get_log_prob(flat=True, discard=Nburn, thin=Nthin)
+            chainsarr = np.hstack([chains, np.vstack([log_probs]).T])
+            mapidx = np.argmax(log_probs)
+            for param in params:
+                param.set_values(mapidx=mapidx)
         
         elif name == 'pocomc':
             Nburn = 0
@@ -1009,9 +1002,11 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psr
 
             chains, lnlike, lnpost = sampler.posterior(resample=True)
             logz, logzerr = sampler.evidence()
-            chainsarr = np.hstack([chains, np.vstack([lnlike, lnpost, 
-                                                     logz*np.ones(lnlike.size), 
-                                                     logzerr*np.ones(lnlike.size)]).T])
+            chainsarr = np.hstack([chains, np.vstack([logz*np.ones(lnlike.size), 
+                                                      logzerr*np.ones(lnlike.size)]).T, lnlike, lnpost])
+            mapidx = np.argmax(lnpost)
+            for param in params:
+                param.set_values(mapidx=mapidx)
         
         print(f'\nSaving the posterior chains in {chainfile}')
         np.save(chainfile, chainsarr)
