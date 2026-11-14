@@ -88,7 +88,6 @@ if __name__ == '__main__':
     # Adding a better functionality in the parameter file to deal with free-spectrum process
 
     # Adding functionality to fit for the DM polynomial terms instead of analytical marginalisation
-    # Adding functionality to fit for DMJUMPs with or without analytical marginalisation
 
     # Creating a DispPTA object to store the structure of the basis depending on the PSD
     # Current Phi matrix operation will be intensive due to the array-based basis structure extraction
@@ -166,9 +165,10 @@ if __name__ == '__main__':
         raise NotImplementedError(f'Currently only powerlaw, free-spectrum and broken powerlaw PSDs are supported')
         
     swdetparams = [param for param in params if param.is_deterministic and 'NE_SW' in param.name]
+    dmjumpparams = np.array([param for param in params if param.is_deterministic and 'JUMP' in param.name])
     orders = np.array([int(param.name.split('NE_SW')[-1]) if param.name.split('NE_SW')[-1] else 0 
                        for param in swdetparams])
-
+    
     if args.vectorise and args.pool:
         print(f'\nCannot use multiprocessing along with vectorisation to perform computations')
         print(f'\nThe process will terminate')
@@ -181,8 +181,8 @@ if __name__ == '__main__':
                  plotchains=args.plotchains, truthsfile=args.truthsfile, 
                  dispefacparams=dispefacparams, dispequadparams=dispequadparams, 
                  dmnparams=dmnparams, swnparams=swnparams, swdetparams=swdetparams, orders=orders, 
-                 plot_generated_realisations=args.plot_realisations, threshold=args.threshold, 
-                 add_dms=args.add_dms, n_realisations=args.n_realisations, 
+                 dmjumpparams=dmjumpparams, plot_generated_realisations=args.plot_realisations, 
+                 threshold=args.threshold, add_dms=args.add_dms, n_realisations=args.n_realisations, 
                  vectorise=args.vectorise, use_pool=args.pool, psd=args.psd)
     
     process_finish = time.time()
