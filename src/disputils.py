@@ -817,9 +817,14 @@ def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, f
         sigma = np.std(chains[:, param.idx])
         param.set_values(median=median, sigma=sigma)
         print(f'\n{param.name}:')
-        print(f' - Median value = {param.median:.4f}')
-        print(f' - Standard Deviation = {param.sigma:.4f}')
-        print(f' - Maximum a-posteriori value = {chains[param.mapidx, param.idx]:.4f}')
+        if not 'JUMP' in param.name:
+            print(f' - Median value = {param.median:.4f}')
+            print(f' - Standard Deviation = {param.sigma:.4f}')
+            print(f' - Maximum a-posteriori value = {chains[param.mapidx, param.idx]:.4f}')
+        else:
+            print(f' - Median value = {param.median:.2e}')
+            print(f' - Standard Deviation = {param.sigma:.2e}')
+            print(f' - Maximum a-posteriori value = {chains[param.mapidx, param.idx]:.2e}')
         dist = np.random.normal(loc=median, scale=threshold*np.abs(sigma), size=n_realisations)
         param_choices[:, param.idx] = np.random.choice(dist, size=n_realisations)
 
@@ -1057,7 +1062,10 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psr
     median_dict = {}
     print(f'\nMedian parameter estimates from PSRDISP:')
     for param, median in zip(params, medians):
-        print(f'\n\t{param.name} = {median:.2f}')
+        if not 'JUMP' in param.name:
+            print(f'\n\t{param.name} = {median:.2f}')
+        else:
+            print(f'\n\t{param.name} = {median:.2e}')
         median_dict[param.name] = median
     
     medianfile = f'{chaindir}/{psrname}.psrdisp.median.noise.json'
