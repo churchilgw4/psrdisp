@@ -257,7 +257,8 @@ def broken_powerlaw(f, log10_A, gamma, delta, log10_fb, kappa, Tspan):
     pl = hcf**2/(12*np.pi**2*f**3*Tspan)
     return pl
 
-def get_Umat(t, Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, geometric_factor, DMNharm, SWNharm, fref):
+def get_Umat(t, Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, geometric_factor, DMNharm, SWNharm, fref, 
+             dmdetparams, dmorders, fit_DMdet, fit_DM0, fit_DM1, fit_DM2):
     '''
         Function to get the basis matrix for Fourier domain red noise process
         This implementation considers SWEPOCH to be the same as the DMEPOCH
@@ -280,25 +281,28 @@ def get_Umat(t, Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, geometric_factor,
     else:
         f_swn = np.zeros(0)
 
-    U = [[0 for val in range(3)] for i in range(t.size)]
-    for i in range(t.size):
-        U[i][0] = 1.0
-        U[i][1] = (t[i]-Tref_dm)*u.s.to(u.year)
-        U[i][2] = 0.5*((t[i]-Tref_dm)*u.s.to(u.year))**2
-        if f_dmn.size:
-            dmn = np.zeros(2*f_dmn.size)
-            for j in range(f_dmn.size):
-                uval = 2*np.pi*(j+1)*(t[i]-Tref_dm)/Tspan
-                dmn[2*j] = np.sin(uval)*convfactor.value
-                dmn[2*j+1] = np.cos(uval)*convfactor.value
-            U[i].extend(dmn)
-        if f_swn.size:
-            swn = np.zeros(2*f_swn.size)
-            for j in range(f_swn.size):
-                uval = 2*np.pi*(j+1)*(t[i]-Tref_sw)/Tspan
-                swn[2*j] = np.sin(uval)*dm_sw[i]
-                swn[2*j+1] = np.cos(uval)*dm_sw[i]
-            U[i].extend(swn)
+    if not fit_DMdet:
+        U = [[0 for val in range(3)] for i in range(t.size)]
+        for i in range(t.size):
+            U[i][0] = 1.0
+            U[i][1] = (t[i]-Tref_dm)*u.s.to(u.year)
+            U[i][2] = 0.5*((t[i]-Tref_dm)*u.s.to(u.year))**2
+            if f_dmn.size:
+                dmn = np.zeros(2*f_dmn.size)
+                for j in range(f_dmn.size):
+                    uval = 2*np.pi*(j+1)*(t[i]-Tref_dm)/Tspan
+                    dmn[2*j] = np.sin(uval)*convfactor.value
+                    dmn[2*j+1] = np.cos(uval)*convfactor.value
+                U[i].extend(dmn)
+            if f_swn.size:
+                swn = np.zeros(2*f_swn.size)
+                for j in range(f_swn.size):
+                    uval = 2*np.pi*(j+1)*(t[i]-Tref_sw)/Tspan
+                    swn[2*j] = np.sin(uval)*dm_sw[i]
+                    swn[2*j+1] = np.cos(uval)*dm_sw[i]
+                U[i].extend(swn)
+    else:
+        U = [[0 for val in range(3-len(dmdetparams))] for i in range(t.size)]
     
     return np.array(U)
 
@@ -536,10 +540,9 @@ def get_dm_sw(n_earth, geometric_factor, vectorise=False):
 def get_swdetsignal(t, Tref_sw, theta, swdetparams, orders, timing_model, geometric_factor, vectorise=False):
     '''
         Function to get a deterministic signal for the solar-wind process
-        InParams: time in s, SW reference epoch in s, SW geometric factor (PINT), 
-                  parameter sample vector, array of deterministic SW parameters, 
-                  array of their orders, timing model object (PINT), SW geometric factor (PINT)
-                  and flag to vectorise the likelihood computations
+        InParams: time in s, SW reference epoch in s, parameter sample vector, 
+                  array of deterministic SW parameters, array of their orders, timing model object (PINT), 
+                  SW geometric factor (PINT) and flag to vectorise the likelihood computations
         Output: the DM contribution from deterministic SW process with a polynomial form
     '''
     if not len(swdetparams):
@@ -561,8 +564,11 @@ def get_swdetsignal(t, Tref_sw, theta, swdetparams, orders, timing_model, geomet
                                     geometric_factor, 
                                     vectorise)*((t-Tref_sw)*u.s.to(u.year))**order/factorial(order)
 
-    try: fid_dm = timing_model.DM.value
-    except AttributeError:
+    try: 
+        fid_dm = timing_model.DM.value
+        if not fid_dm:
+            fid_dm = 0.0
+    except Exception:
         print(f'\nNo fiducial DM present in the timing model')
         print(f'\nUsing DM = 0 as reference')
         fid_dm = 0.0
@@ -589,6 +595,41 @@ def get_dmjump_signal(theta, t, dmjumpparams, vectorise=False):
                 dmjumps = np.where(param.mask[None, :], theta[:, param.idx, None], dmjumps)
                 
     return dmjumps
+
+def get_dmdetsignal(t, Tref_dm, theta, dmdetparams, orders, timing_model, vectorise=False):
+    '''
+        Function to get a deterministic signal for the DM process
+        InParams: time in s, DM reference epoch in s, parameter sample vector, 
+                  array of deterministic DM parameters, array of their orders, timing model object (PINT) 
+                  and flag to vectorise the likelihood computations
+        Output: the DM contribution from deterministic SW process with a polynomial form
+    '''
+    if not len(dmdetparams):
+        if not vectorise:
+            signal = np.zeros(t.size)
+        else:
+            signal = np.zeros((theta.shape[0], t.size))
+    else:
+        if not vectorise:
+            signal = np.zeros(t.size)
+            for param, order in zip(dmdetparams, orders):
+                signal += theta[param.idx]*((t-Tref_dm)*u.s.to(u.year))**order/factorial(order)
+        else:
+            signal = np.zeros((theta.shape[0], t.size))
+            for param, order in zip(dmdetparams, orders):
+                signal += theta[:, param.idx]*((t-Tref_dm)*u.s.to(u.year))**order/factorial(order)
+    
+    try:
+        fid_dm = timing_model.DM.value
+        if not fid_dm:
+            fid_dm = 0.0
+    except Exception:
+        print(f'\nNo fiducial DM present in the timing model')
+        print(f'\nUsing DM = 0 as reference')
+        fid_dm = 0.0
+        
+    signal += fid_dm
+    return signal
 
 def prior_transform(params, show=True, theta=None):
     '''
@@ -650,7 +691,8 @@ def get_lnprior(theta, params, vectorise=False):
 
 def get_lnpost(theta, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, timing_model, DMNharm, 
                SWNharm, fref, dispefacparams, dispequadparams, dmnparams, swnparams, swdetparams, orders, 
-               dmjumpparams, U, geometric_factor, psd, vectorise):
+               dmjumpparams, U, geometric_factor, psd, vectorise, dmdetparams, dmorders, fit_DMdet, 
+               fit_DM0, fit_DM1, fit_DM2):
     '''
         Function to get the log-posterior for different paramters
         InParams: parameter sample vector, list of DispParam parameters, DMs in pc/cm^3, DM errors in pc/cm^3, 
@@ -659,8 +701,10 @@ def get_lnpost(theta, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, fla
                   SWN harmonics, the chromatic reference frequency in MHz, array of DISPEFAC parameters, 
                   array of DISPEQUAD parameters, array pf DM noise parameters, array of SW noise parameters, 
                   array of deterministic SW parameters, array of their orders, array of JUMP parameters, 
-                  noise basis matrix, SW geometric factor (PINT), the PSD of Fourier-domain noise processes and 
-                  flag to vectorise the likelihood computations
+                  noise basis matrix, SW geometric factor (PINT), the PSD of Fourier-domain noise processes,  
+                  flag to vectorise the likelihood computations, array of deterministic DM parameters, 
+                  array of their orders, flag to fit for the deterministic DM model, flag to fit for DM0, 
+                  flag to fit for DM1, and flag to fit for DM2
         Output: the log-posterior value as per the parameter samples
     '''
     lnprior = get_lnprior(theta, params, vectorise)
@@ -671,11 +715,14 @@ def get_lnpost(theta, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, fla
         return lnprior + get_lnlike_optimised(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, 
                                               timing_model, DMNharm, SWNharm, fref, dispefacparams, 
                                               dispequadparams, dmnparams, swnparams, swdetparams, orders, 
-                                              dmjumpparams, U, geometric_factor, psd, vectorise=vectorise)
+                                              dmjumpparams, U, geometric_factor, psd, vectorise=vectorise, 
+                                              dmdetparams=dmdetparams, dmorders=dmorders, fit_DMdet=fit_DMdet, 
+                                              fit_DM0=fit_DM0, fit_DM1=fit_DM1, fit_DM2=fit_DM2)
 
 def get_lnlike_optimised(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, timing_model, 
                          DMNharm, SWNharm, fref, dispefacparams, dispequadparams, dmnparams, swnparams, 
-                         swdetparams, orders, dmjumpparams, U, geometric_factor, psd, vectorise):
+                         swdetparams, sworders, dmjumpparams, U, geometric_factor, psd, vectorise, 
+                         dmdetparams, dmorders, fit_DMdet, fit_DM0, fit_DM1, fit_DM2):
     '''
         Function to get the log-likelihood in an optimised form for all the sampled parameters
         InParams: parameter sample vector, list of DispParam parameters, DMs in pc/cm^3, DM errors in pc/cm^3, 
@@ -684,8 +731,10 @@ def get_lnlike_optimised(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, f
                   SWN harmonics, the chromatic reference frequency in MHz, array of DISPEFAC parameters, 
                   array of DISPEQUAD parameters, array pf DM noise parameters, array of SW noise parameters, 
                   array of deterministic SW parameters, array of their orders, array of JUMP parameters, 
-                  noise basis matrix, SW geometric factor (PINT), the PSD of Fourier-domain noise processes and 
-                  flag to vectorise the likelihood computations
+                  noise basis matrix, SW geometric factor (PINT), the PSD of Fourier-domain noise processes,  
+                  flag to vectorise the likelihood computations, array of deterministic DM parameters, 
+                  array of their orders, flag to fit for the deterministic DM model, flag to fit for DM0, 
+                  flag to fit for DM1, and flag to fit for DM2
         Output: the log-likelihood value as per the parameters
     '''
     # Useful in case the sampler gets stuck
@@ -695,11 +744,13 @@ def get_lnlike_optimised(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, f
             return _cache[key]
     
     N = get_Nmat(theta, dmerrs, dispefacparams, dispequadparams, vectorise=vectorise)
-    Phi = get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, vectorise=vectorise)
-    swdet = get_swdetsignal(t, Tref_sw, theta, swdetparams, orders, timing_model, geometric_factor, 
-                            vectorise=vectorise)
+    Phi = get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, vectorise=vectorise, 
+                     fit_DMdet=fit_DMdet, fit_DM=fit_DM, fit_DM1=fit_DM1, fit_DM2=fit_DM2)
+    swdet = get_swdetsignal(t, Tref_sw, theta, swdetparams, sworders, timing_model, geometric_factor, vectorise=vectorise)
     dmjump = get_dmjump_signal(theta, t, dmjumpparams, vectorise=vectorise)
-    y = dms - swdet - dmjump
+    dmdet = get_dmdetsignal(t, Tref_dm, theta, dmdetparams, dmorders, vectorise=vectorise)
+    
+    y = dms - swdet - dmjump - dmdet
     
     if not vectorise:
         Ninv_y = y / N
@@ -858,7 +909,10 @@ def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, f
         dist = np.random.normal(loc=median, scale=threshold*np.abs(sigma), size=n_realisations)
         param_choices[:, param.idx] = np.random.choice(dist, size=n_realisations)
 
-    try: DM = timing_model.DM.value
+    try: 
+        DM = timing_model.DM.value
+        if not DM:
+            DM = 0.0
     except Exception:
         print(f'\nNo fiducial DM present in the timing model')
         print(f'\nUsing DM = 0 as reference')
@@ -867,12 +921,18 @@ def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, f
         DM1 = timing_model.DM1.value
         if not DM1:
             DM1 = 0.0
-    except Exception: DM1 = 0.0
+    except Exception: 
+        print(f'\nNo fiducial DM1 present in the timing model')
+        print(f'\nUsing DM1 = 0')
+        DM1 = 0.0
     try: 
         DM2 = timing_model.DM2.value
         if not DM2:
             DM2 = 0.0
-    except Exception: DM2 = 0.0
+    except Exception: 
+        print(f'\nNo fiducial DM2 present in the timing model')
+        print(f'\nUsing DM2 = 0')
+        DM2 = 0.0
 
     DMdet_signal = DM + DM1*(t-Tref_dm)*u.s.to(u.year) + DM2*0.5*((t-Tref_dm)*u.s.to(u.year))**2
     
@@ -974,8 +1034,9 @@ def plot_violins(log10_rho_dmn, log10_rho_swn, chains, outdir, psrname, showx=Fa
 
 def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psrname, t, dms, dmerrs, Tspan, 
                  Tref_dm, Tref_sw, toas, flags, timing_model, fref, plotchains, truthsfile, dispefacparams, 
-                 dispequadparams, dmnparams, swnparams, swdetparams, orders, dmjumpparams, 
-                 plot_generated_realisations, threshold, add_dms, n_realisations, vectorise, use_pool, psd):
+                 dispequadparams, dmnparams, swnparams, swdetparams, sworders, dmjumpparams, 
+                 plot_generated_realisations, threshold, add_dms, n_realisations, vectorise, use_pool, psd, 
+                 dmdetparams, dmorders, fit_DMdet, fit_DM0, fit_DM1, fit_DM2):
     '''
         Function to sample the posteriors of dispersive noise processes
         InParams: Sampler name, list of DispParam parameters, Number of emcee samples per walker, 
@@ -988,8 +1049,10 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psr
                   array of their orders, array of JUMP parameters, flag to plot the generated realisations of the 
                   extracted processes, threshold for calculating the randomness in generated realisations, 
                   flag to add DM time series to the realisations, number of realisations to be generated, 
-                  flag to vectorise the likelihood evaluations, flag to use multiprocessing pool and the PSD
-                  of the Fourier-domain noise processes
+                  flag to vectorise the likelihood evaluations, flag to use multiprocessing pool, the PSD
+                  of the Fourier-domain noise processes, array of deterministic DM parameters, 
+                  array of their orders, flag to fit for the deterministic DM model, flag to fit for DM0, 
+                  flag to fit for DM1, and flag to fit for DM2
         Output: None
     '''
     Ndim = len(params)
@@ -997,10 +1060,11 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psr
     param_names = [param.name for param in params]
     param_labels = [param.label for param in params]
     geometric_factor = get_sw_geometry(timing_model, toas)
-    U = get_Umat(t, Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, geometric_factor, DMNharm, SWNharm, fref)
+    U = get_Umat(t, Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, geometric_factor, DMNharm, SWNharm, fref, 
+                 dmdetparams, dmorders, fit_DMdet, fit_DM0, fit_DM1, fit_DM2)
     args = (params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, timing_model, 
-            DMNharm, SWNharm, fref, dispefacparams, dispequadparams, dmnparams, swnparams, 
-            swdetparams, orders, dmjumpparams, U, geometric_factor, psd, vectorise)
+            DMNharm, SWNharm, fref, dispefacparams, dispequadparams, dmnparams, swnparams, swdetparams, sworders, 
+            dmjumpparams, U, geometric_factor, psd, vectorise, dmdetparams, dmorders, fit_DMdet, fit_DM0, fit_DM1, fit_DM2)
     
     if os.path.isfile(chainfile):
         print(f'\nUsing the existing chains from {chainfile}')

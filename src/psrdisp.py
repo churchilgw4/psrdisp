@@ -81,6 +81,9 @@ if __name__ == '__main__':
     parser.add_argument(f'--pool', action=f'store_true', default=False, 
                         help=f'Whether to use multiprocessing for computations')
 
+    parser.add_argument(f'--fit_DMdet', action=f'store_true', default=False, 
+                        help=f'Whether to fit for the deterministic DM process')
+
     args = parser.parse_args()
 
     # Adding functionality for frozen powerlaw parameters by modifying the DispParam class attributes
@@ -162,13 +165,36 @@ if __name__ == '__main__':
         dmnparams = np.array([param for param in params if param.is_red and 'DM' in param.name])
         swnparams = np.array([param for param in params if param.is_red and 'SW' in param.name])
     else:
-        raise NotImplementedError(f'Currently only powerlaw, free-spectrum and broken powerlaw PSDs are supported')
+        raise NotImplementedError(f'\nCurrently only powerlaw, free-spectrum and broken powerlaw PSDs are supported')
         
     swdetparams = [param for param in params if param.is_deterministic and 'NE_SW' in param.name]
     dmjumpparams = np.array([param for param in params if param.is_deterministic and 'JUMP' in param.name])
-    orders = np.array([int(param.name.split('NE_SW')[-1]) if param.name.split('NE_SW')[-1] else 0 
-                       for param in swdetparams])
-    
+    sworders = np.array([int(param.name.split('NE_SW')[-1]) if param.name.split('NE_SW')[-1] else 0 
+                         for param in swdetparams])
+
+    if args.fit_DMdet:
+        dmdetparams = [param for param in params if param.is_deterministic and 'DM' in param.name 
+                       and not 'JUMP' in param.name]
+        dmorders = np.array([int(param.name.split('DM')[-1]) if param.name.split('DM')[-1] else 0 
+                             for param in dmdetparams])
+        fit_DM0, fit_DM1, fit_DM2 = False, False, False
+
+        if not len(dmdetparams):
+            print(f'\nNo deterministic DM model parameters are present in the parameter file')
+            print(f'\nGoing ahead with analytical marginalisation')
+            fit_DMdet = False
+        else:
+            fit_DMdet = True
+            for param in dmdetparams:
+                if param.name == 'DM0':
+                    fit_DM0 = True
+                elif param.name == 'DM1':
+                    fit_DM1 = True
+                elif param.name == 'DM2':
+                    fit_DM2 = True
+                else:
+                    raise NotImplementedError(f'\nCurrently up to 2 orders can be fitted for deterministic DM process')
+                
     if args.vectorise and args.pool:
         print(f'\nCannot use multiprocessing along with vectorisation to perform computations')
         print(f'\nThe process will terminate')
@@ -180,10 +206,11 @@ if __name__ == '__main__':
                  flags=flags, timing_model=psrmodel, fref=args.fref*u.MHz, 
                  plotchains=args.plotchains, truthsfile=args.truthsfile, 
                  dispefacparams=dispefacparams, dispequadparams=dispequadparams, 
-                 dmnparams=dmnparams, swnparams=swnparams, swdetparams=swdetparams, orders=orders, 
+                 dmnparams=dmnparams, swnparams=swnparams, swdetparams=swdetparams, sworders=sworders, 
                  dmjumpparams=dmjumpparams, plot_generated_realisations=args.plot_realisations, 
                  threshold=args.threshold, add_dms=args.add_dms, n_realisations=args.n_realisations, 
-                 vectorise=args.vectorise, use_pool=args.pool, psd=args.psd)
+                 vectorise=args.vectorise, use_pool=args.pool, psd=args.psd, dmdetparams=dmdetparams, 
+                 dmorders=dmorders, fit_DMdet=fit_DMdet, fit_DM0=fit_DM0, fit_DM1=fit_DM1, fit_DM2=fit_DM2)
     
     process_finish = time.time()
     print(f'\nThe process took {(process_finish-process_start)/60:.2f} minutes to finish')
