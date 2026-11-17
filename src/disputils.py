@@ -751,7 +751,7 @@ def get_lnlike_optimised(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, f
 
 def get_realisation(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, timing_model, DMNharm, 
                     SWNharm, fref, dispefacparams, dispequadparams, dmnparams, swnparams, swdetparams, 
-                    orders, U, geometric_factor, psd, vectorise=False):
+                    orders, U, geometric_factor, psd, vectorise=False, jacobi_factor=1.01, r_threshold=1e-6):
     '''
         Function to get a random time-domain realisation of stochastic noise processes
         InParams: parameter sample vector, list of DispParam parameters, DMs in pc/cm^3, DM errors in pc/cm^3, 
@@ -760,8 +760,9 @@ def get_realisation(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags,
                   the chromatic reference frequency in MHz, array of DISPEFAC parameters, 
                   array of DISPEQUAD parameters, array pf DM noise parameters, array of SW noise parameters, 
                   array of deterministic SW parameters, array of their orders, noise basis matrix, 
-                  SW geometric factor (PINT), the PSD of Fourier-domain noise processes and 
-                  flag to vectorise the likelihood computations
+                  SW geometric factor (PINT), the PSD of Fourier-domain noise processes, flag to vectorise the 
+                  likelihood computations, time span scaling factor for Jacobi preconditioning and threshold
+                  for eigenvalue regularisation
         Output: an array of a random time-domain realisation of the stochastic processes
     '''
     N = get_Nmat(theta, dmerrs, dispefacparams, dispequadparams, vectorise=vectorise)
@@ -769,7 +770,7 @@ def get_realisation(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags,
     swdet = get_swdetsignal(t, Tref_sw, theta, swdetparams, orders, timing_model, geometric_factor, 
                             vectorise=vectorise)
     y = dms - swdet
-
+    
     Ninv_U = U / N[:, None]
     UT_Ninv_y = y @ Ninv_U
     Sigmainv = np.diag(Phi) + U.T @ Ninv_U
@@ -780,12 +781,41 @@ def get_realisation(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags,
         z = np.random.randn(len(a_hat))
         a_delta = sl.solve_triangular(Sigmainv_cf, z, lower=False)
         
-    except Exception:
-        Sigmainv_pinv = sl.pinv(Sigmainv)
-        a_hat = Sigmainv_pinv @ UT_Ninv_y
-        z = np.random.randn(len(a_hat))
-        U_svd, s_svd, Vt_svd = sl.svd(Sigmainv)
-        a_delta = (U_svd / np.sqrt(s_svd)) @ z
+    except Exception:    
+        print(f'\nWARNING: Cholesky Decomposition failed during reconstruction.')
+        print(f' - Using Jacobi preconditioning for with a scaling factor of {jacobi_factor} for Tspan.')
+        
+        U = get_Umat(t, jacobi_factor*Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, geometric_factor, DMNharm, SWNharm, fref)
+        N = get_Nmat(theta, dmerrs, dispefacparams, dispequadparams, vectorise=vectorise)
+        Phi = get_Phimat(theta, jacobi_factor*Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, vectorise=vectorise)
+        swdet = get_swdetsignal(t, Tref_sw, theta, swdetparams, orders, timing_model, geometric_factor, 
+                                vectorise=vectorise)
+        y = dms - swdet
+        Ninv_U = U / N[:, None]
+        UT_Ninv_y = y @ Ninv_U
+        Sigmainv = np.diag(Phi) + U.T @ Ninv_U
+        
+        Sigmainv_sym = 0.5 * (Sigmainv + Sigmainv.T)
+        diag = np.diag(Sigmainv_sym)
+
+        inv_sqrt_diag = 1.0 / np.sqrt(diag)
+        S_128 = Sigmainv_sym * inv_sqrt_diag[:, None] * inv_sqrt_diag[None, :]
+        rmat_128 = UT_Ninv_y * inv_sqrt_diag
+        S_64 = np.asarray(S_128, dtype=np.float64)
+        rmat_64 = np.asarray(rmat_128, dtype=np.float64)
+
+        eigvals, eigvecs = sl.eigh(S_64)
+        tol = np.max(eigvals) * r_threshold
+        valid = eigvals > tol
+    
+        inv_eigvals = np.zeros_like(eigvals)
+        inv_eigvals[valid] = 1.0 / eigvals[valid]
+        a_hat_scaled = eigvecs @ (inv_eigvals * (eigvecs.T @ rmat_64))
+        z = np.random.randn(len(a_hat_scaled))
+        a_delta_scaled = eigvecs @ (np.sqrt(inv_eigvals) * z)
+
+        a_hat = np.asarray(a_hat_scaled, dtype=np.float128) * inv_sqrt_diag
+        a_delta = np.asarray(a_delta_scaled, dtype=np.float128) * inv_sqrt_diag
 
     a = a_hat + a_delta
     realisation = U @ a
@@ -869,7 +899,7 @@ def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, f
         ax.grid(ls='dashed')
         _ = ax.set_ylabel(rf'DM [pc/cm$^3$]', fontweight='bold', fontsize=13)
         _ = ax.set_xlabel(f'MJD', fontweight='bold', fontsize=13)
-        ax.errorbar(t*u.s.to(u.day), dms, yerr=dmerrs, fmt='o', ms=7, c='crimson', alpha=0.1, \
+        ax.errorbar(t*u.s.to(u.day), dms, yerr=dmerrs, fmt='o', ms=7, c='crimson', alpha=0.3, \
                          elinewidth=1.0, capsize=2, capthick=0.5, ecolor='k', label='Simulated DM')
         ax.legend(loc='upper left')
         plt.tight_layout()
