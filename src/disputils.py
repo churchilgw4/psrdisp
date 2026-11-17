@@ -774,6 +774,7 @@ def get_realisation(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags,
     Ninv_U = U / N[:, None]
     UT_Ninv_y = y @ Ninv_U
     Sigmainv = np.diag(Phi) + U.T @ Ninv_U
+    
     try:
         Sigmainv_cf = sl.cholesky(Sigmainv, lower=False)
         a_hat = sl.cho_solve((Sigmainv_cf, False), UT_Ninv_y)
@@ -829,14 +830,20 @@ def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, f
         param_choices[:, param.idx] = np.random.choice(dist, size=n_realisations)
 
     try: DM = timing_model.DM.value
-    except AttributeError:
+    except Exception:
         print(f'\nNo fiducial DM present in the timing model')
         print(f'\nUsing DM = 0 as reference')
         DM = 0.0
-    try: DM1 = timing_model.DM1.value
-    except AttributeError: DM1 = 0.0
-    try: DM2 = timing_model.DM2.value
-    except AttributeError: DM2 = 0.0
+    try: 
+        DM1 = timing_model.DM1.value
+        if not DM1:
+            DM1 = 0.0
+    except Exception: DM1 = 0.0
+    try: 
+        DM2 = timing_model.DM2.value
+        if not DM2:
+            DM2 = 0.0
+    except Exception: DM2 = 0.0
 
     DMdet_signal = DM + DM1*(t-Tref_dm)*u.s.to(u.year) + DM2*0.5*((t-Tref_dm)*u.s.to(u.year))**2
     
