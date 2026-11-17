@@ -124,9 +124,8 @@ def get_DispParams(paramfile, flags):
         if not isinstance(flags, np.ndarray):
             flags = np.array(flags)
             
-        paramlines = np.array([f.split('\n')[0] for 
-                               f in open(paramfile, 'r').readlines() 
-                               if not f.startswith('#')])
+        paramlines = np.array([f.split('\n')[0] for f in open(paramfile, 'r').readlines() 
+                               if not f.startswith('#') and len(f.split('\n')[0]) >= 4])
         params = []
         for pidx, paramline in enumerate(paramlines):
             entries = paramline.split()
