@@ -257,13 +257,8 @@ def broken_powerlaw(f, log10_A, gamma, delta, log10_fb, kappa, Tspan):
     pl = hcf**2/(12*np.pi**2*f**3*Tspan)
     return pl
 
-<<<<<<< HEAD
 def get_Umat(t, Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, geometric_factor, DMNharm, SWNharm, 
              fref, dmdetparams, dmorders):
-=======
-def get_Umat(t, Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, geometric_factor, DMNharm, SWNharm, fref, 
-             dmdetparams=None, dmorders=None, fit_DMdet=False, fit_DM0=False, fit_DM1=False, fit_DM2=False):
->>>>>>> dd4263e08499923b04ee1c3098422bc544fefac9
     '''
         Function to get the basis matrix for Fourier domain red noise process
         This implementation considers SWEPOCH to be the same as the DMEPOCH
@@ -630,7 +625,7 @@ def get_dmjump_signal(theta, t, dmjumpparams, vectorise=False):
                 
     return dmjumps
 
-def get_dmdetsignal(t, Tref_dm, theta, dmdetparams, orders, vectorise=False):
+def get_dmdetsignal(t, Tref_dm, theta, dmdetparams, orders, timing_model, vectorise=False):
     '''
         Function to get a deterministic signal for the DM process
         InParams: time in s, DM reference epoch in s, parameter sample vector, 
@@ -652,7 +647,6 @@ def get_dmdetsignal(t, Tref_dm, theta, dmdetparams, orders, vectorise=False):
             signal = np.zeros((theta.shape[0], t.size))
             for param, order in zip(dmdetparams, orders):
                 signal += theta[:, param.idx]*((t-Tref_dm)*u.s.to(u.year))**order/factorial(order)
-<<<<<<< HEAD
     
     # try:
     #     fid_dm = timing_model.DM.value
@@ -664,9 +658,6 @@ def get_dmdetsignal(t, Tref_dm, theta, dmdetparams, orders, vectorise=False):
     #     fid_dm = 0.0
         
     # signal += fid_dm
-=======
-
->>>>>>> dd4263e08499923b04ee1c3098422bc544fefac9
     return signal
 
 def prior_transform(params, show=True, theta=None):
@@ -782,7 +773,8 @@ def get_lnlike_optimised(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, f
             return _cache[key]
     
     N = get_Nmat(theta, dmerrs, dispefacparams, dispequadparams, vectorise=vectorise)
-    Phi = get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, vectorise=vectorise)
+    Phi = get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, vectorise=vectorise, 
+                     fit_DMdet=fit_DMdet, fit_DM=fit_DM, fit_DM1=fit_DM1, fit_DM2=fit_DM2)
     swdet = get_swdetsignal(t, Tref_sw, theta, swdetparams, sworders, timing_model, geometric_factor, vectorise=vectorise)
     dmjump = get_dmjump_signal(theta, t, dmjumpparams, vectorise=vectorise)
     dmdet = get_dmdetsignal(t, Tref_dm, theta, dmdetparams, dmorders, vectorise=vectorise)
@@ -959,7 +951,7 @@ def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, f
         if not DM1:
             DM1 = 0.0
     except Exception: 
-        print(f'\nNo DM1 present in the timing model')
+        print(f'\nNo fiducial DM1 present in the timing model')
         print(f'\nUsing DM1 = 0')
         DM1 = 0.0
     try: 
@@ -967,7 +959,7 @@ def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, f
         if not DM2:
             DM2 = 0.0
     except Exception: 
-        print(f'\nNo DM2 present in the timing model')
+        print(f'\nNo fiducial DM2 present in the timing model')
         print(f'\nUsing DM2 = 0')
         DM2 = 0.0
 
@@ -1251,6 +1243,6 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psr
                           Tref_dm=Tref_dm, Tref_sw=Tref_sw, flags=flags, DMNharm=DMNharm, SWNharm=SWNharm, 
                           fref=fref, outdir=outdir, psrname=psrname, toas=toas, timing_model=timing_model, 
                           dispefacparams=dispefacparams, dispequadparams=dispequadparams, dmnparams=dmnparams, 
-                          swnparams=swnparams, swdetparams=swdetparams, orders=sworders, threshold=threshold, 
+                          swnparams=swnparams, swdetparams=swdetparams, orders=orders, threshold=threshold, 
                           add_dms=add_dms, n_realisations=n_realisations, U=U, geometric_factor=geometric_factor, 
                           save=True, no_title=True, psd=psd, vectorise=False)
