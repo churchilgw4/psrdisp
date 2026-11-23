@@ -823,7 +823,7 @@ def get_realisation(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags,
         
     except Exception:    
         print(f'\nWARNING: Cholesky Decomposition failed during reconstruction.')
-        print(f' - Using Jacobi preconditioning for with a scaling factor of {jacobi_factor} for Tspan.')
+        print(f' - Using Jacobi preconditioning with a scaling factor of {jacobi_factor} for Tspan.')
         
         U = get_Umat(t, jacobi_factor*Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, geometric_factor, DMNharm, SWNharm, fref)
         N = get_Nmat(theta, dmerrs, dispefacparams, dispequadparams, vectorise=vectorise)
