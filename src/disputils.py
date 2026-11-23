@@ -258,7 +258,7 @@ def broken_powerlaw(f, log10_A, gamma, delta, log10_fb, kappa, Tspan):
     return pl
 
 def get_Umat(t, Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, geometric_factor, DMNharm, SWNharm, fref, 
-             dmdetparams, dmorders, fit_DMdet, fit_DM0, fit_DM1, fit_DM2):
+             dmdetparams=None, dmorders=None, fit_DMdet=False, fit_DM0=False, fit_DM1=False, fit_DM2=False):
     '''
         Function to get the basis matrix for Fourier domain red noise process
         This implementation considers SWEPOCH to be the same as the DMEPOCH
@@ -911,7 +911,7 @@ def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, f
         if not DM1:
             DM1 = 0.0
     except Exception: 
-        print(f'\nNo fiducial DM1 present in the timing model')
+        print(f'\nNo DM1 present in the timing model')
         print(f'\nUsing DM1 = 0')
         DM1 = 0.0
     try: 
@@ -919,7 +919,7 @@ def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, f
         if not DM2:
             DM2 = 0.0
     except Exception: 
-        print(f'\nNo fiducial DM2 present in the timing model')
+        print(f'\nNo DM2 present in the timing model')
         print(f'\nUsing DM2 = 0')
         DM2 = 0.0
 
@@ -1202,6 +1202,6 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psr
                           Tref_dm=Tref_dm, Tref_sw=Tref_sw, flags=flags, DMNharm=DMNharm, SWNharm=SWNharm, 
                           fref=fref, outdir=outdir, psrname=psrname, toas=toas, timing_model=timing_model, 
                           dispefacparams=dispefacparams, dispequadparams=dispequadparams, dmnparams=dmnparams, 
-                          swnparams=swnparams, swdetparams=swdetparams, orders=orders, threshold=threshold, 
+                          swnparams=swnparams, swdetparams=swdetparams, orders=sworders, threshold=threshold, 
                           add_dms=add_dms, n_realisations=n_realisations, U=U, geometric_factor=geometric_factor, 
                           save=True, no_title=True, psd=psd, vectorise=False)
