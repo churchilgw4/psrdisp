@@ -172,13 +172,13 @@ if __name__ == '__main__':
     sworders = np.array([int(param.name.split('NE_SW')[-1]) if param.name.split('NE_SW')[-1] else 0 
                          for param in swdetparams])
 
-    if args.fit_DMdet:
+    dmdetparams, dmorders = [], []
+    fit_DMdet, fit_DM0, fit_DM1, fit_DM2 = args.fit_DMdet, False, False, False
+    if fit_DMdet:
         dmdetparams = [param for param in params if param.is_deterministic and 'DM' in param.name 
                        and not 'JUMP' in param.name]
         dmorders = np.array([int(param.name.split('DM')[-1]) if param.name.split('DM')[-1] else 0 
                              for param in dmdetparams])
-        fit_DM0, fit_DM1, fit_DM2 = False, False, False
-
         if not len(dmdetparams):
             print(f'\nNo deterministic DM model parameters are present in the parameter file')
             print(f'\nGoing ahead with analytical marginalisation')

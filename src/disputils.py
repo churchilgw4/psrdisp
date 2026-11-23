@@ -596,7 +596,7 @@ def get_dmjump_signal(theta, t, dmjumpparams, vectorise=False):
                 
     return dmjumps
 
-def get_dmdetsignal(t, Tref_dm, theta, dmdetparams, orders, timing_model, vectorise=False):
+def get_dmdetsignal(t, Tref_dm, theta, dmdetparams, orders, vectorise=False):
     '''
         Function to get a deterministic signal for the DM process
         InParams: time in s, DM reference epoch in s, parameter sample vector, 
@@ -618,17 +618,7 @@ def get_dmdetsignal(t, Tref_dm, theta, dmdetparams, orders, timing_model, vector
             signal = np.zeros((theta.shape[0], t.size))
             for param, order in zip(dmdetparams, orders):
                 signal += theta[:, param.idx]*((t-Tref_dm)*u.s.to(u.year))**order/factorial(order)
-    
-    try:
-        fid_dm = timing_model.DM.value
-        if not fid_dm:
-            fid_dm = 0.0
-    except Exception:
-        print(f'\nNo fiducial DM present in the timing model')
-        print(f'\nUsing DM = 0 as reference')
-        fid_dm = 0.0
-        
-    signal += fid_dm
+
     return signal
 
 def prior_transform(params, show=True, theta=None):
@@ -744,8 +734,7 @@ def get_lnlike_optimised(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, f
             return _cache[key]
     
     N = get_Nmat(theta, dmerrs, dispefacparams, dispequadparams, vectorise=vectorise)
-    Phi = get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, vectorise=vectorise, 
-                     fit_DMdet=fit_DMdet, fit_DM=fit_DM, fit_DM1=fit_DM1, fit_DM2=fit_DM2)
+    Phi = get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, vectorise=vectorise)
     swdet = get_swdetsignal(t, Tref_sw, theta, swdetparams, sworders, timing_model, geometric_factor, vectorise=vectorise)
     dmjump = get_dmjump_signal(theta, t, dmjumpparams, vectorise=vectorise)
     dmdet = get_dmdetsignal(t, Tref_dm, theta, dmdetparams, dmorders, vectorise=vectorise)
