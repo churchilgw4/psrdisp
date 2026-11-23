@@ -257,8 +257,8 @@ def broken_powerlaw(f, log10_A, gamma, delta, log10_fb, kappa, Tspan):
     pl = hcf**2/(12*np.pi**2*f**3*Tspan)
     return pl
 
-def get_Umat(t, Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, geometric_factor, DMNharm, SWNharm, fref, 
-             dmdetparams, dmorders, fit_DMdet, fit_DM0, fit_DM1, fit_DM2):
+def get_Umat(t, Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, geometric_factor, DMNharm, SWNharm, 
+             fref, dmdetparams, dmorders):
     '''
         Function to get the basis matrix for Fourier domain red noise process
         This implementation considers SWEPOCH to be the same as the DMEPOCH
@@ -266,7 +266,8 @@ def get_Umat(t, Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, geometric_factor,
         with the definitions in ENTERPRSIE (taking fref as 1400 MHz for comparison)
         InParams: time in s, time span in s, DM reference epoch in s, SW reference epoch in s, 
                   array of DM noise parameters, array of SW noise parameters, SW geometric factor (PINT), 
-                  DM noise harmonics, SW noise harmonics and chromatic reference frequency in MHz
+                  DM noise harmonics, SW noise harmonics, chromatic reference frequency in MHz, 
+                  array of deterministic DM parameters and array of their orders
         Output: the DM basis matrix
     '''
     if dmnparams.size:
@@ -281,28 +282,46 @@ def get_Umat(t, Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, geometric_factor,
     else:
         f_swn = np.zeros(0)
 
-    if not fit_DMdet:
-        U = [[0 for val in range(3)] for i in range(t.size)]
-        for i in range(t.size):
-            U[i][0] = 1.0
-            U[i][1] = (t[i]-Tref_dm)*u.s.to(u.year)
-            U[i][2] = 0.5*((t[i]-Tref_dm)*u.s.to(u.year))**2
-            if f_dmn.size:
-                dmn = np.zeros(2*f_dmn.size)
-                for j in range(f_dmn.size):
-                    uval = 2*np.pi*(j+1)*(t[i]-Tref_dm)/Tspan
-                    dmn[2*j] = np.sin(uval)*convfactor.value
-                    dmn[2*j+1] = np.cos(uval)*convfactor.value
-                U[i].extend(dmn)
-            if f_swn.size:
-                swn = np.zeros(2*f_swn.size)
-                for j in range(f_swn.size):
-                    uval = 2*np.pi*(j+1)*(t[i]-Tref_sw)/Tspan
-                    swn[2*j] = np.sin(uval)*dm_sw[i]
-                    swn[2*j+1] = np.cos(uval)*dm_sw[i]
-                U[i].extend(swn)
-    else:
-        U = [[0 for val in range(3-len(dmdetparams))] for i in range(t.size)]
+    # U = [[0 for val in range(3)] for i in range(t.size)]
+    # for i in range(t.size):
+    #     U[i][0] = 1.0
+    #     U[i][1] = (t[i]-Tref_dm)*u.s.to(u.year)
+    #     U[i][2] = 0.5*((t[i]-Tref_dm)*u.s.to(u.year))**2
+    #     if f_dmn.size:
+    #         dmn = np.zeros(2*f_dmn.size)
+    #         for j in range(f_dmn.size):
+    #             uval = 2*np.pi*(j+1)*(t[i]-Tref_dm)/Tspan
+    #             dmn[2*j] = np.sin(uval)*convfactor.value
+    #             dmn[2*j+1] = np.cos(uval)*convfactor.value
+    #         U[i].extend(dmn)
+    #     if f_swn.size:
+    #         swn = np.zeros(2*f_swn.size)
+    #         for j in range(f_swn.size):
+    #             uval = 2*np.pi*(j+1)*(t[i]-Tref_sw)/Tspan
+    #             swn[2*j] = np.sin(uval)*dm_sw[i]
+    #             swn[2*j+1] = np.cos(uval)*dm_sw[i]
+    #         U[i].extend(swn)
+
+    maxorderidx = np.max(dmorders)+1
+    U = [[0 for val in range(3-maxorderidx)] for i in range(t.size)]
+    for i in range(t.size):
+        for order in range(3):
+            if not order in dmorders:
+                U[i][order-maxorderidx] = (t[i]-Tref_dm)*u.s.to(u.year)**order/factorial(order)
+        if f_dmn.size:
+            dmn = np.zeros(2*f_dmn.size)
+            for j in range(f_dmn.size):
+                uval = 2*np.pi*(j+1)*(t[i]-Tref_dm)/Tspan
+                dmn[2*j] = np.sin(uval)*convfactor.value
+                dmn[2*j+1] = np.cos(uval)*convfactor.value
+            U[i].extend(dmn)
+        if f_swn.size:
+            swn = np.zeros(2*f_swn.size)
+            for j in range(f_swn.size):
+                uval = 2*np.pi*(j+1)*(t[i]-Tref_sw)/Tspan
+                swn[2*j] = np.sin(uval)*dm_sw[i]
+                swn[2*j+1] = np.cos(uval)*dm_sw[i]
+            U[i].extend(swn)
     
     return np.array(U)
 
@@ -339,12 +358,13 @@ def get_Nmat(theta, dmerrs, dispefacparams, dispequadparams, vectorise=False):
             Nmat = np.array(dispefacs**2 * (dmerrs[None, :]**2 + 10**(2*dispequads)))
         return Nmat
 
-def get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, vectorise=False):
+def get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, dmdetparams, dmorders, vectorise=False):
     '''
         Function to get the Gaussian Process kernel matrix for power-law processes
         InParams: parameter sample vector, time span in s, array of DM noise parameters, 
                   array of SW noise parameters, DM noise harmonics, SW noise harmonics, the PSD of 
-                  Fourier-domain noise processes and flag to vectorise the likelihood computations
+                  Fourier-domain noise processes, array of deterministic DM parameters, 
+                  array of their orders and flag to vectorise the likelihood computations
         Output: the GP kernel matrix for a PL spectrum with analytically marginalised DM Polynomial
     '''
     if dmnparams.size:
@@ -424,10 +444,19 @@ def get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, vector
             raise NotImplementedError(f'Currently only powerlaw, free-spectrum and broken powerlaw PSDs are supported')
     else:
         f_swn = np.zeros(0)
-    
+
+    maxorderidx = np.max(dmorders)+1
     if not vectorise:
         Phi = []
-        Phi.extend([1e+40, 1e+40, 1e+40])
+        if not fit_DM0:
+            Phi.extend([1e+40, 1e+40, 1e+40])
+        else:
+            if not fit_DM1:
+                Phi.extend([1e+40, 1e+40])
+            else:
+                
+        
+        
         if f_dmn.size:
             dmn = np.zeros(2*f_dmn.size)
             for i in range(f_dmn.size):
@@ -619,16 +648,16 @@ def get_dmdetsignal(t, Tref_dm, theta, dmdetparams, orders, timing_model, vector
             for param, order in zip(dmdetparams, orders):
                 signal += theta[:, param.idx]*((t-Tref_dm)*u.s.to(u.year))**order/factorial(order)
     
-    try:
-        fid_dm = timing_model.DM.value
-        if not fid_dm:
-            fid_dm = 0.0
-    except Exception:
-        print(f'\nNo fiducial DM present in the timing model')
-        print(f'\nUsing DM = 0 as reference')
-        fid_dm = 0.0
+    # try:
+    #     fid_dm = timing_model.DM.value
+    #     if not fid_dm:
+    #         fid_dm = 0.0
+    # except Exception:
+    #     print(f'\nNo fiducial DM present in the timing model')
+    #     print(f'\nUsing DM = 0 as reference')
+    #     fid_dm = 0.0
         
-    signal += fid_dm
+    # signal += fid_dm
     return signal
 
 def prior_transform(params, show=True, theta=None):
@@ -834,7 +863,7 @@ def get_realisation(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags,
         
     except Exception:    
         print(f'\nWARNING: Cholesky Decomposition failed during reconstruction.')
-        print(f' - Using Jacobi preconditioning for with a scaling factor of {jacobi_factor} for Tspan.')
+        print(f' - Using Jacobi preconditioning with a scaling factor of {jacobi_factor} for Tspan.')
         
         U = get_Umat(t, jacobi_factor*Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, geometric_factor, DMNharm, SWNharm, fref)
         N = get_Nmat(theta, dmerrs, dispefacparams, dispequadparams, vectorise=vectorise)
@@ -1060,11 +1089,12 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psr
     param_names = [param.name for param in params]
     param_labels = [param.label for param in params]
     geometric_factor = get_sw_geometry(timing_model, toas)
-    U = get_Umat(t, Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, geometric_factor, DMNharm, SWNharm, fref, 
-                 dmdetparams, dmorders, fit_DMdet, fit_DM0, fit_DM1, fit_DM2)
+    U = get_Umat(t, Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, geometric_factor, DMNharm, SWNharm, 
+                 fref, dmdetparams, dmorders)
     args = (params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, timing_model, 
-            DMNharm, SWNharm, fref, dispefacparams, dispequadparams, dmnparams, swnparams, swdetparams, sworders, 
-            dmjumpparams, U, geometric_factor, psd, vectorise, dmdetparams, dmorders, fit_DMdet, fit_DM0, fit_DM1, fit_DM2)
+            DMNharm, SWNharm, fref, dispefacparams, dispequadparams, dmnparams, swnparams, swdetparams, 
+            sworders, dmjumpparams, U, geometric_factor, psd, vectorise, dmdetparams, dmorders, 
+            fit_DMdet, fit_DM0, fit_DM1, fit_DM2)
     
     if os.path.isfile(chainfile):
         print(f'\nUsing the existing chains from {chainfile}')

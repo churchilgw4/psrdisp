@@ -171,14 +171,13 @@ if __name__ == '__main__':
     dmjumpparams = np.array([param for param in params if param.is_deterministic and 'JUMP' in param.name])
     sworders = np.array([int(param.name.split('NE_SW')[-1]) if param.name.split('NE_SW')[-1] else 0 
                          for param in swdetparams])
-
-    if args.fit_DMdet:
-        dmdetparams = [param for param in params if param.is_deterministic and 'DM' in param.name 
-                       and not 'JUMP' in param.name]
-        dmorders = np.array([int(param.name.split('DM')[-1]) if param.name.split('DM')[-1] else 0 
-                             for param in dmdetparams])
-        fit_DM0, fit_DM1, fit_DM2 = False, False, False
-
+    dmdetparams = [param for param in params if param.is_deterministic and 'DM' in param.name 
+                   and not 'JUMP' in param.name]
+    dmorders = np.array([int(param.name.split('DM')[-1]) if param.name.split('DM')[-1] else 0 
+                         for param in dmdetparams])
+    
+    fit_DMdet, fit_DM0, fit_DM1, fit_DM2 = args.fit_DMdet, False, False, False
+    if fit_DMdet:
         if not len(dmdetparams):
             print(f'\nNo deterministic DM model parameters are present in the parameter file')
             print(f'\nGoing ahead with analytical marginalisation')
@@ -190,8 +189,20 @@ if __name__ == '__main__':
                     fit_DM0 = True
                 elif param.name == 'DM1':
                     fit_DM1 = True
+                    if not fit_DM0:
+                        print(f'\nDM0 is not fitted but DM1 is trying to be fitted.')
+                        print(f'\nThe process will termminate')
+                        sys.exit()
                 elif param.name == 'DM2':
                     fit_DM2 = True
+                    if not fit_DM0:
+                        print(f'\nDM0 is not fitted but DM1 is trying to be fitted.')
+                        print(f'\nThe process will termminate')
+                        sys.exit()
+                    elif not fit_DM1:
+                        print(f'\nDM1 is not fitted but DM2 is trying to be fitted.')
+                        print(f'\nThe process will termminate')
+                        sys.exit()
                 else:
                     raise NotImplementedError(f'\nCurrently up to 2 orders can be fitted for deterministic DM process')
                 
