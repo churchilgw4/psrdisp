@@ -951,7 +951,7 @@ def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, f
         if not DM1:
             DM1 = 0.0
     except Exception: 
-        print(f'\nNo fiducial DM1 present in the timing model')
+        print(f'\nNo DM1 present in the timing model')
         print(f'\nUsing DM1 = 0')
         DM1 = 0.0
     try: 
@@ -959,7 +959,7 @@ def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, f
         if not DM2:
             DM2 = 0.0
     except Exception: 
-        print(f'\nNo fiducial DM2 present in the timing model')
+        print(f'\nNo DM2 present in the timing model')
         print(f'\nUsing DM2 = 0')
         DM2 = 0.0
 
