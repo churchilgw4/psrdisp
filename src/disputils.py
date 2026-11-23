@@ -454,9 +454,7 @@ def get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, dmdetp
             if not fit_DM1:
                 Phi.extend([1e+40, 1e+40])
             else:
-                
-        
-        
+                Phi.extend([1e+40])
         if f_dmn.size:
             dmn = np.zeros(2*f_dmn.size)
             for i in range(f_dmn.size):
