@@ -322,7 +322,7 @@ def get_Umat(t, Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, geometric_factor,
                 swn[2*j] = np.sin(uval)*dm_sw[i]
                 swn[2*j+1] = np.cos(uval)*dm_sw[i]
             U[i].extend(swn)
-    
+
     return np.array(U)
 
 def get_Nmat(theta, dmerrs, dispefacparams, dispequadparams, vectorise=False):
