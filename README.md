@@ -4,9 +4,9 @@ A single-pulsar noise analysis package to model dispersive processes using high-
 Currently supported models:
 1. DM Taylor series (up to second order)
 2. SW Taylor series
-3. DM noise -- GP implementation with power-law kernel
-4. SW noise -- GP implementation with power-law kernel
-5. White noise -- up to epoch-wise quadrature variation to uncertainties
+3. DM noise: GP implementation with power-law kernel
+4. SW noise: GP implementation with power-law kernel
+5. White noise: up to epoch-wise and backend-wise quadrature variation to uncertainties
 
 ## Usage
 
