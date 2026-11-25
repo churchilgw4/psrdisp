@@ -257,8 +257,8 @@ def broken_powerlaw(f, log10_A, gamma, delta, log10_fb, kappa, Tspan):
     pl = hcf**2/(12*np.pi**2*f**3*Tspan)
     return pl
 
-def get_Umat(t, Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, geometric_factor, DMNharm, SWNharm, 
-             fref, dmdetparams, dmorders):
+def get_Umat(t, Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, geometric_factor, DMNharm, SWNharm, fref, 
+             dmdetparams, dmorders):
     '''
         Function to get the basis matrix for Fourier domain red noise process
         This implementation considers SWEPOCH to be the same as the DMEPOCH
@@ -282,46 +282,48 @@ def get_Umat(t, Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, geometric_factor,
     else:
         f_swn = np.zeros(0)
 
-    # U = [[0 for val in range(3)] for i in range(t.size)]
-    # for i in range(t.size):
-    #     U[i][0] = 1.0
-    #     U[i][1] = (t[i]-Tref_dm)*u.s.to(u.year)
-    #     U[i][2] = 0.5*((t[i]-Tref_dm)*u.s.to(u.year))**2
-    #     if f_dmn.size:
-    #         dmn = np.zeros(2*f_dmn.size)
-    #         for j in range(f_dmn.size):
-    #             uval = 2*np.pi*(j+1)*(t[i]-Tref_dm)/Tspan
-    #             dmn[2*j] = np.sin(uval)*convfactor.value
-    #             dmn[2*j+1] = np.cos(uval)*convfactor.value
-    #         U[i].extend(dmn)
-    #     if f_swn.size:
-    #         swn = np.zeros(2*f_swn.size)
-    #         for j in range(f_swn.size):
-    #             uval = 2*np.pi*(j+1)*(t[i]-Tref_sw)/Tspan
-    #             swn[2*j] = np.sin(uval)*dm_sw[i]
-    #             swn[2*j+1] = np.cos(uval)*dm_sw[i]
-    #         U[i].extend(swn)
+    if not len(dmorders):
+        U = [[0 for val in range(3)] for i in range(t.size)]
+        for i in range(t.size):
+            U[i][0] = 1.0
+            U[i][1] = (t[i]-Tref_dm)*u.s.to(u.year)
+            U[i][2] = 0.5*((t[i]-Tref_dm)*u.s.to(u.year))**2
+            if f_dmn.size:
+                dmn = np.zeros(2*f_dmn.size)
+                for j in range(f_dmn.size):
+                    uval = 2*np.pi*(j+1)*(t[i]-Tref_dm)/Tspan
+                    dmn[2*j] = np.sin(uval)*convfactor.value
+                    dmn[2*j+1] = np.cos(uval)*convfactor.value
+                U[i].extend(dmn)
+            if f_swn.size:
+                swn = np.zeros(2*f_swn.size)
+                for j in range(f_swn.size):
+                    uval = 2*np.pi*(j+1)*(t[i]-Tref_sw)/Tspan
+                    swn[2*j] = np.sin(uval)*dm_sw[i]
+                    swn[2*j+1] = np.cos(uval)*dm_sw[i]
+                U[i].extend(swn)
 
-    maxorderidx = np.max(dmorders)+1
-    U = [[0 for val in range(3-maxorderidx)] for i in range(t.size)]
-    for i in range(t.size):
-        for order in range(3):
-            if not order in dmorders:
-                U[i][order-maxorderidx] = (t[i]-Tref_dm)*u.s.to(u.year)**order/factorial(order)
-        if f_dmn.size:
-            dmn = np.zeros(2*f_dmn.size)
-            for j in range(f_dmn.size):
-                uval = 2*np.pi*(j+1)*(t[i]-Tref_dm)/Tspan
-                dmn[2*j] = np.sin(uval)*convfactor.value
-                dmn[2*j+1] = np.cos(uval)*convfactor.value
-            U[i].extend(dmn)
-        if f_swn.size:
-            swn = np.zeros(2*f_swn.size)
-            for j in range(f_swn.size):
-                uval = 2*np.pi*(j+1)*(t[i]-Tref_sw)/Tspan
-                swn[2*j] = np.sin(uval)*dm_sw[i]
-                swn[2*j+1] = np.cos(uval)*dm_sw[i]
-            U[i].extend(swn)
+    else:
+        maxorderidx = np.max(dmorders)+1
+        U = [[0 for val in range(3-maxorderidx)] for i in range(t.size)]
+        for i in range(t.size):
+            for order in range(3):
+                if not order in dmorders:
+                    U[i][order-maxorderidx] = (t[i]-Tref_dm)*u.s.to(u.year)**order/factorial(order)
+            if f_dmn.size:
+                dmn = np.zeros(2*f_dmn.size)
+                for j in range(f_dmn.size):
+                    uval = 2*np.pi*(j+1)*(t[i]-Tref_dm)/Tspan
+                    dmn[2*j] = np.sin(uval)*convfactor.value
+                    dmn[2*j+1] = np.cos(uval)*convfactor.value
+                U[i].extend(dmn)
+            if f_swn.size:
+                swn = np.zeros(2*f_swn.size)
+                for j in range(f_swn.size):
+                    uval = 2*np.pi*(j+1)*(t[i]-Tref_sw)/Tspan
+                    swn[2*j] = np.sin(uval)*dm_sw[i]
+                    swn[2*j+1] = np.cos(uval)*dm_sw[i]
+                U[i].extend(swn)
 
     return np.array(U)
 
@@ -358,7 +360,8 @@ def get_Nmat(theta, dmerrs, dispefacparams, dispequadparams, vectorise=False):
             Nmat = np.array(dispefacs**2 * (dmerrs[None, :]**2 + 10**(2*dispequads)))
         return Nmat
 
-def get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, dmdetparams, dmorders, vectorise=False):
+def get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, dmdetparams, dmorders, fit_DM0, fit_DM1, 
+               fit_DM2, vectorise=False):
     '''
         Function to get the Gaussian Process kernel matrix for power-law processes
         InParams: parameter sample vector, time span in s, array of DM noise parameters, 
@@ -445,7 +448,9 @@ def get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, dmdetp
     else:
         f_swn = np.zeros(0)
 
-    maxorderidx = np.max(dmorders)+1
+    if len(dmorders):
+        maxorderidx = np.max(dmorders)+1
+        
     if not vectorise:
         Phi = []
         if not fit_DM0:
@@ -454,7 +459,9 @@ def get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, dmdetp
             if not fit_DM1:
                 Phi.extend([1e+40, 1e+40])
             else:
-                Phi.extend([1e+40])
+                if not fit_DM2:
+                    Phi.extend([1e+40])
+                    
         if f_dmn.size:
             dmn = np.zeros(2*f_dmn.size)
             for i in range(f_dmn.size):
@@ -829,7 +836,8 @@ def get_lnlike_optimised(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, f
 
 def get_realisation(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags, timing_model, DMNharm, 
                     SWNharm, fref, dispefacparams, dispequadparams, dmnparams, swnparams, swdetparams, 
-                    orders, U, geometric_factor, psd, vectorise=False, jacobi_factor=1.01, r_threshold=1e-6):
+                    sworders, U, geometric_factor, psd, dmdetparams, dmorders, fit_DMdet, fit_DM0, fit_DM1, fit_DM2, 
+                    vectorise=False, jacobi_factor=1.01, r_threshold=1e-6):
     '''
         Function to get a random time-domain realisation of stochastic noise processes
         InParams: parameter sample vector, list of DispParam parameters, DMs in pc/cm^3, DM errors in pc/cm^3, 
@@ -838,15 +846,16 @@ def get_realisation(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags,
                   the chromatic reference frequency in MHz, array of DISPEFAC parameters, 
                   array of DISPEQUAD parameters, array pf DM noise parameters, array of SW noise parameters, 
                   array of deterministic SW parameters, array of their orders, noise basis matrix, 
-                  SW geometric factor (PINT), the PSD of Fourier-domain noise processes, flag to vectorise the 
-                  likelihood computations, time span scaling factor for Jacobi preconditioning and threshold
-                  for eigenvalue regularisation
+                  SW geometric factor (PINT), the PSD of Fourier-domain noise processes, array of deterministic DM parameters, 
+                  array of their orders, flag to fit for the deterministic DM model, flag to fit for DM0, 
+                  flag to fit for DM1, and flag to fit for DM2, flag to vectorise the likelihood computations, 
+                  time span scaling factor for Jacobi preconditioning and threshold for eigenvalue regularisation
         Output: an array of a random time-domain realisation of the stochastic processes
     '''
     N = get_Nmat(theta, dmerrs, dispefacparams, dispequadparams, vectorise=vectorise)
-    Phi = get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, vectorise=vectorise)
-    swdet = get_swdetsignal(t, Tref_sw, theta, swdetparams, orders, timing_model, geometric_factor, 
-                            vectorise=vectorise)
+    Phi = get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, dmdetparams, dmorders, fit_DM0, fit_DM1, 
+                     fit_DM2, vectorise=vectorise)
+    swdet = get_swdetsignal(t, Tref_sw, theta, swdetparams, sworders, timing_model, geometric_factor, vectorise=vectorise)
     y = dms - swdet
     
     Ninv_U = U / N[:, None]
@@ -863,11 +872,12 @@ def get_realisation(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags,
         print(f'\nWARNING: Cholesky Decomposition failed during reconstruction.')
         print(f' - Using Jacobi preconditioning with a scaling factor of {jacobi_factor} for Tspan.')
         
-        U = get_Umat(t, jacobi_factor*Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, geometric_factor, DMNharm, SWNharm, fref)
+        U = get_Umat(t, jacobi_factor*Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, geometric_factor, DMNharm, SWNharm, 
+                     fref, dmdetparams, dmorders)
         N = get_Nmat(theta, dmerrs, dispefacparams, dispequadparams, vectorise=vectorise)
-        Phi = get_Phimat(theta, jacobi_factor*Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, vectorise=vectorise)
-        swdet = get_swdetsignal(t, Tref_sw, theta, swdetparams, orders, timing_model, geometric_factor, 
-                                vectorise=vectorise)
+        Phi = get_Phimat(theta, jacobi_factor*Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, dmdetparams, dmorders, fit_DM0, 
+                         fit_DM1, fit_DM2, vectorise=vectorise)
+        swdet = get_swdetsignal(t, Tref_sw, theta, swdetparams, sworders, timing_model, geometric_factor, vectorise=vectorise)
         y = dms - swdet
         Ninv_U = U / N[:, None]
         UT_Ninv_y = y @ Ninv_U
@@ -901,8 +911,9 @@ def get_realisation(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags,
 
 def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, flags, DMNharm, SWNharm, 
                       fref, outdir, psrname, toas, timing_model, dispefacparams, dispequadparams, dmnparams, 
-                      swnparams, swdetparams, orders, threshold, add_dms, n_realisations, U, 
-                      geometric_factor, save=True, no_title=True, psd='powerlaw', vectorise=False):
+                      swnparams, swdetparams, sworders, threshold, add_dms, n_realisations, U, 
+                      geometric_factor, dmdetparams, dmorders, fit_DMdet, fit_DM0, fit_DM1, fit_DM2, 
+                      save=True, no_title=True, psd='powerlaw', vectorise=False):
     '''
         Function to plot the time-domain realisations of the full DM process including stochastic noises
         InParams: number of realisations to be plotted, posterior chains of sampled parameters, 
@@ -914,9 +925,10 @@ def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, f
                   array pf DM noise parameters, array of SW noise parameters, array of deterministic SW parameters, 
                   array of their orders, threshold for calculating the randomness in generated realisations, 
                   flag to add DM time series to the realisations, number of realisations 
-                  to be generated, noise basis matrix, SW geoemtric factor (PINT), flag to save the plot, 
-                  flag to add title in the plot, the PSD of the Fourier-domain noise processes and 
-                  flag to vectorise the likelihood computations
+                  to be generated, noise basis matrix, SW geoemtric factor (PINT), array of deterministic DM parameters, 
+                  array of their orders, flag to fit for the deterministic DM model, flag to fit for DM0, 
+                  flag to fit for DM1, and flag to fit for DM2, flag to save the plot, flag to add title in the plot, 
+                  the PSD of the Fourier-domain noise processes and flag to vectorise the likelihood computations
         Output: None
     '''
     param_choices = np.zeros((n_realisations, len(params)))
@@ -947,6 +959,8 @@ def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, f
     try: 
         DM1 = timing_model.DM1.value
         if not DM1:
+            print(f'\nCannot extract DM1 from the timing model')
+            print(f'\nUsing DM1 = 0')
             DM1 = 0.0
     except Exception: 
         print(f'\nNo DM1 present in the timing model')
@@ -955,6 +969,8 @@ def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, f
     try: 
         DM2 = timing_model.DM2.value
         if not DM2:
+            print(f'\nCannot extract DM2 from the timing model')
+            print(f'\nUsing DM2 = 0')
             DM2 = 0.0
     except Exception: 
         print(f'\nNo DM2 present in the timing model')
@@ -967,9 +983,10 @@ def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, f
     for i in range(n_realisations):
         realisation = get_realisation(param_choices[i, :], dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, 
                                       flags, timing_model, DMNharm, SWNharm, fref, dispefacparams, 
-                                      dispequadparams, dmnparams, swnparams, swdetparams, orders, U, 
-                                      geometric_factor, psd, vectorise=vectorise)
-        SWdet_signal = get_swdetsignal(t, Tref_sw, param_choices[i, :], swdetparams, orders, 
+                                      dispequadparams, dmnparams, swnparams, swdetparams, sworders, U, 
+                                      geometric_factor, psd, dmdetparams, dmorders, fit_DMdet, fit_DM0, 
+                                      fit_DM1, fit_DM2, vectorise=vectorise)
+        SWdet_signal = get_swdetsignal(t, Tref_sw, param_choices[i, :], swdetparams, sworders, 
                                        timing_model, geometric_factor, vectorise=vectorise) - DM
         full_signal[i, :] = DMdet_signal + SWdet_signal + realisation
 
@@ -1241,6 +1258,7 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psr
                           Tref_dm=Tref_dm, Tref_sw=Tref_sw, flags=flags, DMNharm=DMNharm, SWNharm=SWNharm, 
                           fref=fref, outdir=outdir, psrname=psrname, toas=toas, timing_model=timing_model, 
                           dispefacparams=dispefacparams, dispequadparams=dispequadparams, dmnparams=dmnparams, 
-                          swnparams=swnparams, swdetparams=swdetparams, orders=orders, threshold=threshold, 
+                          swnparams=swnparams, swdetparams=swdetparams, sworders=sworders, threshold=threshold, 
                           add_dms=add_dms, n_realisations=n_realisations, U=U, geometric_factor=geometric_factor, 
-                          save=True, no_title=True, psd=psd, vectorise=False)
+                          dmdetparams=dmdetparams, dmorders=dmorders, fit_DMdet=fit_DMdet, fit_DM0=fit_DM0, 
+                          fit_DM1=fit_DM1, fit_DM2=fit_DM2, save=True, no_title=True, psd=psd, vectorise=False)
