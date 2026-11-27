@@ -90,10 +90,11 @@ if __name__ == '__main__':
     # such that if pdist == frozen then the parameter will have a delta-function prior
     # Adding a better functionality in the parameter file to deal with free-spectrum process
 
-    # Adding functionality to fit for the DM polynomial terms instead of analytical marginalisation
-
     # Creating a DispPTA object to store the structure of the basis depending on the PSD
     # Current Phi matrix operation will be intensive due to the array-based basis structure extraction
+
+    # Making the overall structure in a way to substract DM directly from the likelihood function instead of 
+    # adding to SWdet, which will make the structure more elegant with all signals as perturbations
     
     if args.outdir:
         outdir = args.outdir
@@ -176,14 +177,15 @@ if __name__ == '__main__':
     dmorders = np.array([int(param.name.split('DM')[-1]) if param.name.split('DM')[-1] else 0 
                          for param in dmdetparams])
     
-    fit_DMdet, fit_DM0, fit_DM1, fit_DM2 = args.fit_DMdet, False, False, False
-    if fit_DMdet:
+    fit_DM0, fit_DM1, fit_DM2 = False, False, False
+    if args.fit_DMdet:
         if not len(dmdetparams):
-            print(f'\nNo deterministic DM model parameters are present in the parameter file')
-            print(f'\nGoing ahead with analytical marginalisation')
-            fit_DMdet = False
+            print(f'\nNo DM polynomial entries are present in the parameter file but the --fit_DMdet flag is set to {args.fit_DMdet}.')
+            print(f'\nThe process will terminate')
+            sys.exit()
         else:
-            fit_DMdet = True
+            print(f'\nThe --fit_DMdet flag is set to {args.fit_DMdet} and DM polynomial entries are present in the parameter file.')
+            print(f'\nIncluding DM polynomial model as a deterministic signal in the noise modeling')
             for param in dmdetparams:
                 if param.name == 'DM0':
                     fit_DM0 = True
@@ -205,6 +207,11 @@ if __name__ == '__main__':
                         sys.exit()
                 else:
                     raise NotImplementedError(f'\nCurrently up to 2 orders can be fitted for deterministic DM process')
+    else:
+        if len(dmdetparams):
+            print(f'\nThe --fit_DMdet flag is set to {args.fit_DMdet} but the DM polynomial entries are present in the parameter file.')
+            print(f'\nThe process will terminate')
+            sys.exit()
                 
     if args.vectorise and args.pool:
         print(f'\nCannot use multiprocessing along with vectorisation to perform computations')
@@ -221,7 +228,7 @@ if __name__ == '__main__':
                  dmjumpparams=dmjumpparams, plot_generated_realisations=args.plot_realisations, 
                  threshold=args.threshold, add_dms=args.add_dms, n_realisations=args.n_realisations, 
                  vectorise=args.vectorise, use_pool=args.pool, psd=args.psd, dmdetparams=dmdetparams, 
-                 dmorders=dmorders, fit_DMdet=fit_DMdet, fit_DM0=fit_DM0, fit_DM1=fit_DM1, fit_DM2=fit_DM2)
+                 dmorders=dmorders, fit_DMdet=args.fit_DMdet, fit_DM0=fit_DM0, fit_DM1=fit_DM1, fit_DM2=fit_DM2)
     
     process_finish = time.time()
     print(f'\nThe process took {(process_finish-process_start)/60:.2f} minutes to finish')

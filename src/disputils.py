@@ -360,15 +360,14 @@ def get_Nmat(theta, dmerrs, dispefacparams, dispequadparams, vectorise=False):
             Nmat = np.array(dispefacs**2 * (dmerrs[None, :]**2 + 10**(2*dispequads)))
         return Nmat
 
-def get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, dmdetparams, dmorders, fit_DM0, fit_DM1, 
-               fit_DM2, vectorise=False):
+def get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, fit_DM0, fit_DM1, fit_DM2, vectorise=False):
     '''
         Function to get the Gaussian Process kernel matrix for power-law processes
         InParams: parameter sample vector, time span in s, array of DM noise parameters, 
                   array of SW noise parameters, DM noise harmonics, SW noise harmonics, the PSD of 
-                  Fourier-domain noise processes, array of deterministic DM parameters, 
-                  array of their orders and flag to vectorise the likelihood computations
-        Output: the GP kernel matrix for a PL spectrum with analytically marginalised DM Polynomial
+                  Fourier-domain noise processes, flag to fit for DM0, flag to fit for DM1, flag to fit for DM2 
+                  and flag to vectorise the likelihood computations
+        Output: the GP kernel matrix for a PSD spectrum and DM polynomial
     '''
     if dmnparams.size:
         f_dmn = get_freqs(Tspan, DMNharm)
@@ -447,9 +446,6 @@ def get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, dmdetp
             raise NotImplementedError(f'Currently only powerlaw, free-spectrum and broken powerlaw PSDs are supported')
     else:
         f_swn = np.zeros(0)
-
-    if len(dmorders):
-        maxorderidx = np.max(dmorders)+1
         
     if not vectorise:
         Phi = []
@@ -481,6 +477,7 @@ def get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, dmdetp
                                                             kappa=theta[kappa_dmn.idx], 
                                                             Tspan=Tspan)
             Phi.extend(dmn)
+            
         if f_swn.size:
             swn = np.zeros(2*f_swn.size)
             for i in range(f_swn.size):
@@ -503,7 +500,15 @@ def get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, dmdetp
     else:
         Phi = [[] for walker in range(theta.shape[0])]
         for walker in range(theta.shape[0]):
-            Phi[walker].extend([1e+40, 1e+40, 1e+40])
+            if not fit_DM0:
+                Phi[walker].extend([1e+40, 1e+40, 1e+40])
+            else:
+                if not fit_DM1:
+                    Phi[walker].extend([1e+40, 1e+40])
+                else:
+                    if not fit_DM2:
+                        Phi[walker].extend([1e+40])
+                    
             if f_dmn.size:
                 dmn = np.zeros(2*f_dmn.size)
                 for i in range(f_dmn.size):
@@ -523,6 +528,7 @@ def get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, dmdetp
                                                                 kappa=theta[walker, kappa_dmn.idx], 
                                                                 Tspan=Tspan)
                 Phi[walker].extend(dmn)
+                
             if f_swn.size:
                 swn = np.zeros(2*f_swn.size)
                 for i in range(f_swn.size):
@@ -630,7 +636,7 @@ def get_dmjump_signal(theta, t, dmjumpparams, vectorise=False):
                 
     return dmjumps
 
-def get_dmdetsignal(t, Tref_dm, theta, dmdetparams, orders, timing_model, vectorise=False):
+def get_dmdetsignal(t, Tref_dm, theta, dmdetparams, orders, vectorise=False):
     '''
         Function to get a deterministic signal for the DM process
         InParams: time in s, DM reference epoch in s, parameter sample vector, 
@@ -638,31 +644,17 @@ def get_dmdetsignal(t, Tref_dm, theta, dmdetparams, orders, timing_model, vector
                   and flag to vectorise the likelihood computations
         Output: the DM contribution from deterministic SW process with a polynomial form
     '''
-    if not len(dmdetparams):
-        if not vectorise:
-            signal = np.zeros(t.size)
-        else:
-            signal = np.zeros((theta.shape[0], t.size))
-    else:
-        if not vectorise:
-            signal = np.zeros(t.size)
+    if not vectorise:
+        signal = np.zeros(t.size)
+        if len(dmdetparams):
             for param, order in zip(dmdetparams, orders):
                 signal += theta[param.idx]*((t-Tref_dm)*u.s.to(u.year))**order/factorial(order)
-        else:
-            signal = np.zeros((theta.shape[0], t.size))
+    else:
+        signal = np.zeros((theta.shape[0], t.size))
+        if len(dmdetparams):
             for param, order in zip(dmdetparams, orders):
                 signal += theta[:, param.idx]*((t-Tref_dm)*u.s.to(u.year))**order/factorial(order)
-    
-    # try:
-    #     fid_dm = timing_model.DM.value
-    #     if not fid_dm:
-    #         fid_dm = 0.0
-    # except Exception:
-    #     print(f'\nNo fiducial DM present in the timing model')
-    #     print(f'\nUsing DM = 0 as reference')
-    #     fid_dm = 0.0
-        
-    # signal += fid_dm
+
     return signal
 
 def prior_transform(params, show=True, theta=None):
@@ -777,12 +769,11 @@ def get_lnlike_optimised(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, f
         if key in _cache.keys():
             return _cache[key]
     
-    N = get_Nmat(theta, dmerrs, dispefacparams, dispequadparams, vectorise=vectorise)
-    Phi = get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, vectorise=vectorise, 
-                     fit_DMdet=fit_DMdet, fit_DM=fit_DM, fit_DM1=fit_DM1, fit_DM2=fit_DM2)
-    swdet = get_swdetsignal(t, Tref_sw, theta, swdetparams, sworders, timing_model, geometric_factor, vectorise=vectorise)
-    dmjump = get_dmjump_signal(theta, t, dmjumpparams, vectorise=vectorise)
-    dmdet = get_dmdetsignal(t, Tref_dm, theta, dmdetparams, dmorders, vectorise=vectorise)
+    N = get_Nmat(theta, dmerrs, dispefacparams, dispequadparams, vectorise)
+    Phi = get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, fit_DM0, fit_DM1, fit_DM2, vectorise)
+    swdet = get_swdetsignal(t, Tref_sw, theta, swdetparams, sworders, timing_model, geometric_factor, vectorise)
+    dmjump = get_dmjump_signal(theta, t, dmjumpparams, vectorise)
+    dmdet = get_dmdetsignal(t, Tref_dm, theta, dmdetparams, dmorders, vectorise)
     
     y = dms - swdet - dmjump - dmdet
     
@@ -852,11 +843,11 @@ def get_realisation(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags,
                   time span scaling factor for Jacobi preconditioning and threshold for eigenvalue regularisation
         Output: an array of a random time-domain realisation of the stochastic processes
     '''
-    N = get_Nmat(theta, dmerrs, dispefacparams, dispequadparams, vectorise=vectorise)
-    Phi = get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, dmdetparams, dmorders, fit_DM0, fit_DM1, 
-                     fit_DM2, vectorise=vectorise)
-    swdet = get_swdetsignal(t, Tref_sw, theta, swdetparams, sworders, timing_model, geometric_factor, vectorise=vectorise)
-    y = dms - swdet
+    N = get_Nmat(theta, dmerrs, dispefacparams, dispequadparams, vectorise)
+    Phi = get_Phimat(theta, Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, fit_DM0, fit_DM1, fit_DM2, vectorise)
+    swdet = get_swdetsignal(t, Tref_sw, theta, swdetparams, sworders, timing_model, geometric_factor, vectorise)
+    dmdet = get_dmdetsignal(t, Tref_dm, theta, dmdetparams, dmorders, vectorise)
+    y = dms - swdet - dmdet
     
     Ninv_U = U / N[:, None]
     UT_Ninv_y = y @ Ninv_U
@@ -871,14 +862,9 @@ def get_realisation(theta, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, toas, flags,
     except Exception:    
         print(f'\nWARNING: Cholesky Decomposition failed during reconstruction.')
         print(f' - Using Jacobi preconditioning with a scaling factor of {jacobi_factor} for Tspan.')
-        
         U = get_Umat(t, jacobi_factor*Tspan, Tref_dm, Tref_sw, dmnparams, swnparams, geometric_factor, DMNharm, SWNharm, 
                      fref, dmdetparams, dmorders)
-        N = get_Nmat(theta, dmerrs, dispefacparams, dispequadparams, vectorise=vectorise)
-        Phi = get_Phimat(theta, jacobi_factor*Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, dmdetparams, dmorders, fit_DM0, 
-                         fit_DM1, fit_DM2, vectorise=vectorise)
-        swdet = get_swdetsignal(t, Tref_sw, theta, swdetparams, sworders, timing_model, geometric_factor, vectorise=vectorise)
-        y = dms - swdet
+        Phi = get_Phimat(theta, jacobi_factor*Tspan, dmnparams, swnparams, DMNharm, SWNharm, psd, fit_DM0, fit_DM1, fit_DM2, vectorise)
         Ninv_U = U / N[:, None]
         UT_Ninv_y = y @ Ninv_U
         Sigmainv = np.diag(Phi) + U.T @ Ninv_U
@@ -937,7 +923,7 @@ def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, f
         sigma = np.std(chains[:, param.idx])
         param.set_values(median=median, sigma=sigma)
         print(f'\n{param.name}:')
-        if not 'JUMP' in param.name:
+        if not 'JUMP' in param.name and not param in dmdetparams:
             print(f' - Median value = {param.median:.4f}')
             print(f' - Standard Deviation = {param.sigma:.4f}')
             print(f' - Maximum a-posteriori value = {chains[param.mapidx, param.idx]:.4f}')
@@ -956,28 +942,33 @@ def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, f
         print(f'\nNo fiducial DM present in the timing model')
         print(f'\nUsing DM = 0 as reference')
         DM = 0.0
-    try: 
-        DM1 = timing_model.DM1.value
-        if not DM1:
-            print(f'\nCannot extract DM1 from the timing model')
+        
+    if not fit_DM1:
+        try: 
+            DM1 = timing_model.DM1.value
+            if not DM1:
+                print(f'\nCannot extract DM1 from the timing model')
+                print(f'\nUsing DM1 = 0')
+                DM1 = 0.0
+        except Exception: 
+            print(f'\nNo DM1 present in the timing model')
             print(f'\nUsing DM1 = 0')
             DM1 = 0.0
-    except Exception: 
-        print(f'\nNo DM1 present in the timing model')
-        print(f'\nUsing DM1 = 0')
-        DM1 = 0.0
-    try: 
-        DM2 = timing_model.DM2.value
-        if not DM2:
-            print(f'\nCannot extract DM2 from the timing model')
+
+    if not fit_DM2:
+        try: 
+            DM2 = timing_model.DM2.value
+            if not DM2:
+                print(f'\nCannot extract DM2 from the timing model')
+                print(f'\nUsing DM2 = 0')
+                DM2 = 0.0
+        except Exception: 
+            print(f'\nNo DM2 present in the timing model')
             print(f'\nUsing DM2 = 0')
             DM2 = 0.0
-    except Exception: 
-        print(f'\nNo DM2 present in the timing model')
-        print(f'\nUsing DM2 = 0')
-        DM2 = 0.0
 
-    DMdet_signal = DM + DM1*(t-Tref_dm)*u.s.to(u.year) + DM2*0.5*((t-Tref_dm)*u.s.to(u.year))**2
+    if not fit_DMdet:
+        DMdet_signal = DM + DM1*(t-Tref_dm)*u.s.to(u.year) + DM2*0.5*((t-Tref_dm)*u.s.to(u.year))**2
     
     full_signal = np.zeros((n_realisations, t.size))
     for i in range(n_realisations):
@@ -985,9 +976,16 @@ def plot_realisations(chains, params, dms, dmerrs, t, Tspan, Tref_dm, Tref_sw, f
                                       flags, timing_model, DMNharm, SWNharm, fref, dispefacparams, 
                                       dispequadparams, dmnparams, swnparams, swdetparams, sworders, U, 
                                       geometric_factor, psd, dmdetparams, dmorders, fit_DMdet, fit_DM0, 
-                                      fit_DM1, fit_DM2, vectorise=vectorise)
+                                      fit_DM1, fit_DM2, vectorise)
         SWdet_signal = get_swdetsignal(t, Tref_sw, param_choices[i, :], swdetparams, sworders, 
-                                       timing_model, geometric_factor, vectorise=vectorise) - DM
+                                       timing_model, geometric_factor, vectorise) - DM
+        if fit_DMdet:
+            DMdet_signal = DM + get_dmdetsignal(t, Tref_dm, param_choices[i, :], dmdetparams, dmorders, vectorise)
+            if not fit_DM1:
+                DMdet_signal += DM1*(t-Tref_dm)*u.s.to(u.year) + DM2*0.5*((t-Tref_dm)*u.s.to(u.year))**2
+            elif not fit_DM2:
+                DMdet_signal += DM2*0.5*((t-Tref_dm)*u.s.to(u.year))**2
+        
         full_signal[i, :] = DMdet_signal + SWdet_signal + realisation
 
     if add_dms:
@@ -1207,7 +1205,7 @@ def sample_noise(name, params, Nsamples, DMNharm, SWNharm, outdir, chaindir, psr
     median_dict = {}
     print(f'\nMedian parameter estimates from PSRDISP:')
     for param, median in zip(params, medians):
-        if not 'JUMP' in param.name:
+        if not 'JUMP' in param.name and not param in dmdetparams:
             print(f'\n\t{param.name} = {median:.2f}')
         else:
             print(f'\n\t{param.name} = {median:.2e}')
